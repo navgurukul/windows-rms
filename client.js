@@ -1,162 +1,189 @@
-// client.js
 const os = require('os');
 const axios = require('axios');
-const { exec } = require('child_process');
-const AutoLaunch = require('auto-launch');
+const fs = require('fs').promises;
+const path = require('path');
+const crypto = require('crypto');
 
-// Auto-launch configuration
-const autoLauncher = new AutoLaunch({
-    name: 'RemoteManagementClient',
-    path: process.execPath,
-});
+// Configuration
+const CONFIG = {
+    SERVER_URL: 'http://localhost:3000',
+    METRICS_INTERVAL: 10000, // 10 seconds for testing (change to 600000 for 10 minutes in production)
+    RETRY_INTERVAL: 5000     // 5 seconds retry interval
+};
 
-// Enable auto-launch on startup
-autoLauncher.enable();
+// Session and system tracking variables
+let sessionStartTime = Date.now();
+let lastMetricsSend = Date.now();
+const clientId = `${os.hostname()}-${Date.now()}`;
+const systemId = generateSystemId();
 
-class RemoteManagementClient {
-    constructor(serverUrl) {
-        this.serverUrl = serverUrl;
-        this.clientId = this.generateClientId();
-        this.connected = false;
+function generateSystemId() {
+    // Generate a unique system ID based on hardware information
+    const systemInfo = [
+        os.hostname(),
+        os.platform(),
+        os.arch(),
+        os.cpus()[0].model,
+        os.totalmem()
+    ].join('|');
+
+    return crypto.createHash('sha256').update(systemInfo).digest('hex').substring(0, 12);
+}
+
+async function getSystemLocation() {
+    try {
+        // Get network interfaces to determine location context
+        const interfaces = os.networkInterfaces();
+        const networkInfo = Object.keys(interfaces)
+            .filter(iface => interfaces[iface].some(addr => !addr.internal))
+            .map(iface => ({
+                name: iface,
+                addresses: interfaces[iface]
+                    .filter(addr => !addr.internal)
+                    .map(addr => addr.address)
+            }));
+
+        return {
+            hostname: os.hostname(),
+            network: networkInfo,
+            domain: os.hostname().split('.').slice(1).join('.') || 'local',
+            computerName: process.env.COMPUTERNAME || os.hostname()
+        };
+    } catch (error) {
+        console.error('Error getting system location:', error);
+        return {
+            hostname: os.hostname(),
+            network: [],
+            domain: 'unknown',
+            computerName: os.hostname()
+        };
     }
+}
 
-    generateClientId() {
-        return `${os.hostname()}-${Date.now()}`;
-    }
+async function sendSessionMetrics(retryCount = 0) {
+    const currentTime = Date.now();
+    const sessionDuration = currentTime - sessionStartTime;
 
-    async registerWithServer() {
-        try {
-            const systemInfo = {
+    try {
+        const location = await getSystemLocation();
+        const metrics = {
+            clientId,
+            systemId,
+            timestamp: new Date().toISOString(),
+            session: {
+                startTime: new Date(sessionStartTime).toISOString(),
+                currentTime: new Date(currentTime).toISOString(),
+                duration: {
+                    milliseconds: sessionDuration,
+                    formatted: formatDuration(sessionDuration)
+                }
+            },
+            location,
+            system: {
                 hostname: os.hostname(),
                 platform: os.platform(),
+                arch: os.arch(),
                 release: os.release(),
-                uptime: os.uptime(),
-                clientId: this.clientId
-            };
-
-            const response = await axios.post(`${this.serverUrl}/register`, systemInfo);
-            this.connected = true;
-            console.log('Successfully registered with server:', response.data);
-            return true;
-        } catch (error) {
-            console.error('Failed to register with server:', error.message);
-            return false;
-        }
-    }
-
-    async pollForCommands() {
-        try {
-            const response = await axios.get(`${this.serverUrl}/commands/${this.clientId}`);
-            const commands = response.data;
-
-            if (commands && commands.length > 0) {
-                for (const command of commands) {
-                    await this.executeCommand(command);
+                uptime: formatDuration(os.uptime() * 1000),
+                memory: {
+                    total: os.totalmem(),
+                    free: os.freemem(),
+                    usagePercent: ((os.totalmem() - os.freemem()) / os.totalmem() * 100).toFixed(2)
+                },
+                cpu: {
+                    model: os.cpus()[0].model,
+                    cores: os.cpus().length,
+                    loadAvg: os.loadavg()
                 }
-            }
-        } catch (error) {
-            console.error('Error polling for commands:', error.message);
-        }
-    }
-
-    async executeCommand(command) {
-        try {
-            switch (command.type) {
-                case 'INSTALL_SOFTWARE':
-                    await this.installSoftware(command.payload);
-                    break;
-                case 'UPDATE_CONFIG':
-                    await this.updateConfiguration(command.payload);
-                    break;
-                default:
-                    console.log('Unknown command type:', command.type);
-            }
-
-            // Report command execution status back to server
-            await this.reportCommandStatus(command.id, 'completed');
-        } catch (error) {
-            console.error('Error executing command:', error);
-            await this.reportCommandStatus(command.id, 'failed', error.message);
-        }
-    }
-
-    async installSoftware(software) {
-        return new Promise((resolve, reject) => {
-            // Using PowerShell to install software silently
-            const command = `Start-Process -Wait -FilePath "${software.installerPath}" -ArgumentList "/quiet /norestart"`;
-
-            exec(`powershell -Command "${command}"`, (error, stdout, stderr) => {
-                if (error) {
-                    reject(error);
-                    return;
-                }
-                resolve(stdout);
-            });
-        });
-    }
-
-    async updateConfiguration(config) {
-        // Implement configuration updates using Windows Registry or config files
-        // This is a simplified example
-        return new Promise((resolve, reject) => {
-            const command = `reg add "${config.regPath}" /v "${config.name}" /t "${config.type}" /d "${config.value}" /f`;
-
-            exec(command, (error, stdout, stderr) => {
-                if (error) {
-                    reject(error);
-                    return;
-                }
-                resolve(stdout);
-            });
-        });
-    }
-
-    async reportCommandStatus(commandId, status, error = null) {
-        try {
-            await axios.post(`${this.serverUrl}/command-status`, {
-                clientId: this.clientId,
-                commandId: commandId,
-                status: status,
-                error: error
-            });
-        } catch (error) {
-            console.error('Failed to report command status:', error.message);
-        }
-    }
-
-    async sendSystemMetrics() {
-        const metrics = {
-            uptime: os.uptime(),
-            freeMemory: os.freemem(),
-            totalMemory: os.totalmem(),
-            cpuUsage: os.loadavg(),
-            timestamp: new Date().toISOString()
+            },
+            date: new Date().toISOString().split('T')[0]
         };
 
-        try {
-            await axios.post(`${this.serverUrl}/metrics/${this.clientId}`, metrics);
-        } catch (error) {
-            console.error('Failed to send metrics:', error.message);
+        // Log to console
+        console.clear(); // Clear console for better readability
+        console.log('\nSession Status Update:', new Date().toISOString());
+        console.log('System ID:', systemId);
+        console.log('Location:', location.computerName, '(' + location.domain + ')');
+        console.log('Session Duration:', metrics.session.duration.formatted);
+        console.log('Memory Usage:', metrics.system.memory.usagePercent + '%');
+        console.log('CPU Load (1m):', metrics.system.cpu.loadAvg[0].toFixed(2));
+
+        const response = await axios.post(`${CONFIG.SERVER_URL}/metrics/${clientId}`, metrics);
+        if (response.data.status === 'received') {
+            lastMetricsSend = currentTime;
+        }
+    } catch (error) {
+        console.error('Error sending metrics:', error.message);
+
+        // Implement retry logic with backoff
+        if (retryCount < 3) {
+            const retryDelay = CONFIG.RETRY_INTERVAL * Math.pow(2, retryCount);
+            console.log(`Retrying in ${retryDelay / 1000} seconds...`);
+            setTimeout(() => sendSessionMetrics(retryCount + 1), retryDelay);
         }
     }
+}
 
-    async start() {
-        // Register with server
-        const registered = await this.registerWithServer();
-        if (!registered) {
-            console.error('Failed to register with server. Retrying in 1 minute...');
-            setTimeout(() => this.start(), 60000);
-            return;
-        }
+function formatDuration(milliseconds) {
+    const seconds = Math.floor(milliseconds / 1000);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainingSeconds = seconds % 60;
 
-        // Start polling for commands every 30 seconds
-        setInterval(() => this.pollForCommands(), 30000);
+    return `${hours}h ${minutes}m ${remainingSeconds}s`;
+}
 
-        // Send system metrics every 5 minutes
-        setInterval(() => this.sendSystemMetrics(), 300000);
+async function handleShutdown() {
+    console.log('\nInitiating graceful shutdown...');
+
+    try {
+        const endTime = Date.now();
+        const finalMetrics = {
+            clientId,
+            systemId,
+            type: 'SESSION_END',
+            session: {
+                startTime: new Date(sessionStartTime).toISOString(),
+                endTime: new Date(endTime).toISOString(),
+                totalDuration: formatDuration(endTime - sessionStartTime)
+            },
+            date: new Date().toISOString().split('T')[0]
+        };
+
+        await axios.post(`${CONFIG.SERVER_URL}/metrics/${clientId}`, finalMetrics);
+        console.log('Final session metrics sent successfully');
+    } catch (error) {
+        console.error('Error sending final metrics:', error.message);
+    }
+
+    process.exit(0);
+}
+
+async function startClient() {
+    console.log('Starting client...');
+    console.log('System ID:', systemId);
+    console.log('Client ID:', clientId);
+
+    try {
+        // Initial metrics send
+        await sendSessionMetrics();
+
+        // Set up regular interval for sending metrics
+        setInterval(sendSessionMetrics, CONFIG.METRICS_INTERVAL);
+
+        // Handle graceful shutdown
+        process.on('SIGINT', handleShutdown);
+        process.on('SIGTERM', handleShutdown);
+
+        console.log(`Metrics will be sent every ${CONFIG.METRICS_INTERVAL / 1000} seconds`);
+    } catch (error) {
+        console.error('Error starting client:', error.message);
+        process.exit(1);
     }
 }
 
 // Start the client
-const client = new RemoteManagementClient('http://your-server-url:3000');
-client.start();
+startClient().catch(error => {
+    console.error('Fatal error starting client:', error);
+    process.exit(1);
+});
