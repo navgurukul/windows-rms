@@ -3,12 +3,16 @@ const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 
 // Configuration
 const CONFIG = {
     SERVER_URL: 'http://localhost:3000',
-    METRICS_INTERVAL: 10000, // 10 seconds for testing (change to 600000 for 10 minutes in production)
-    RETRY_INTERVAL: 5000     // 5 seconds retry interval
+    METRICS_INTERVAL: 10000, // 10 seconds for testing
+    RETRY_INTERVAL: 5000,    // 5 seconds retry interval
+    INSTALL_DIR: path.join(os.tmpdir(), 'software_installs')
 };
 
 // Session and system tracking variables
@@ -17,8 +21,67 @@ let lastMetricsSend = Date.now();
 const clientId = `${os.hostname()}-${Date.now()}`;
 const systemId = generateSystemId();
 
+// Software Installation Functions
+async function installSoftware(softwareName) {
+    console.log(`\nAttempting to install ${softwareName}...`);
+
+    try {
+        // PowerShell command to install silently
+        const psCommand = `
+            $progressPreference = 'silentlyContinue';
+            if (!(Get-Package -Name "${softwareName}" -ErrorAction SilentlyContinue)) {
+                winget install --id "${softwareName}" --silent --accept-package-agreements --accept-source-agreements | Out-Null
+            }
+        `;
+
+        // Execute PowerShell command with hidden window
+        const { stdout, stderr } = await execAsync(`powershell.exe -WindowStyle Hidden -Command "${psCommand}"`);
+
+        console.log('\nInstallation Output:', stdout);
+
+        if (stderr) {
+            console.error('Installation Warnings:', stderr);
+        }
+
+        console.log(`\nSuccessfully installed ${softwareName}`);
+        await cleanupInstallFiles();
+        return true;
+    } catch (error) {
+        console.error(`Error installing ${softwareName}:`, error.message);
+        return false;
+    }
+}
+
+async function cleanupInstallFiles() {
+    try {
+        const wingetCache = path.join(os.homedir(), 'AppData', 'Local', 'Packages', 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe', 'LocalCache', 'Downloaded');
+
+        // Clean winget cache
+        await execAsync(`powershell.exe -Command "Remove-Item -Path '${wingetCache}\\*' -Recurse -Force -ErrorAction SilentlyContinue"`);
+
+        console.log('Cleaned up installation files');
+    } catch (error) {
+        console.error('Error during cleanup:', error.message);
+    }
+}
+
+async function processCommand(command) {
+    if (!command) return;
+
+    const [action, ...params] = command.split(':');
+
+    switch (action.toLowerCase()) {
+        case 'install':
+            const softwareName = params.join(':');
+            return await installSoftware(softwareName);
+        default:
+            console.log(`Unknown command: ${action}`);
+            return false;
+    }
+}
+
+// System Monitoring Functions
 function generateSystemId() {
-    // Generate a unique system ID based on hardware information
     const systemInfo = [
         os.hostname(),
         os.platform(),
@@ -32,7 +95,6 @@ function generateSystemId() {
 
 async function getSystemLocation() {
     try {
-        // Get network interfaces to determine location context
         const interfaces = os.networkInterfaces();
         const networkInfo = Object.keys(interfaces)
             .filter(iface => interfaces[iface].some(addr => !addr.internal))
@@ -99,8 +161,7 @@ async function sendSessionMetrics(retryCount = 0) {
             date: new Date().toISOString().split('T')[0]
         };
 
-        // Log to console
-        console.clear(); // Clear console for better readability
+        console.clear();
         console.log('\nSession Status Update:', new Date().toISOString());
         console.log('System ID:', systemId);
         console.log('Location:', location.computerName, '(' + location.domain + ')');
@@ -111,11 +172,15 @@ async function sendSessionMetrics(retryCount = 0) {
         const response = await axios.post(`${CONFIG.SERVER_URL}/metrics/${clientId}`, metrics);
         if (response.data.status === 'received') {
             lastMetricsSend = currentTime;
+
+            // Check for commands in the response
+            if (response.data.command) {
+                await processCommand(response.data.command);
+            }
         }
     } catch (error) {
         console.error('Error sending metrics:', error.message);
 
-        // Implement retry logic with backoff
         if (retryCount < 3) {
             const retryDelay = CONFIG.RETRY_INTERVAL * Math.pow(2, retryCount);
             console.log(`Retrying in ${retryDelay / 1000} seconds...`);
@@ -165,6 +230,9 @@ async function startClient() {
     console.log('Client ID:', clientId);
 
     try {
+        // Test software installation (uncomment to test)
+        await installSoftware('VideoLAN.VLC');
+
         // Initial metrics send
         await sendSessionMetrics();
 
