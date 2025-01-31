@@ -1,10 +1,11 @@
-const os = require('os');
-const axios = require('axios');
-const fs = require('fs').promises;
-const path = require('path');
-const crypto = require('crypto');
-const { exec } = require('child_process');
-const { promisify } = require('util');
+import os from 'os';
+import axios from 'axios';
+import { promises as fs } from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
 const execAsync = promisify(exec);
 
 // Configuration
@@ -21,33 +22,87 @@ let lastMetricsSend = Date.now();
 const clientId = `${os.hostname()}-${Date.now()}`;
 const systemId = generateSystemId();
 
-// Software Installation Functions
-async function installSoftware(softwareName) {
-    console.log(`\nAttempting to install ${softwareName}...`);
-
+// Enhanced Software Installation Functions
+async function checkWingetAvailability() {
     try {
-        // PowerShell command to install silently
-        const psCommand = `
-            $progressPreference = 'silentlyContinue';
-            if (!(Get-Package -Name "${softwareName}" -ErrorAction SilentlyContinue)) {
-                winget install --id "${softwareName}" --silent --accept-package-agreements --accept-source-agreements | Out-Null
-            }
-        `;
+        await execAsync('winget --version');
+        return true;
+    } catch (error) {
+        console.error('Error: Winget is not installed on this system.');
+        console.error('Please install App Installer from the Microsoft Store to use this script.');
+        return false;
+    }
+}
 
-        // Execute PowerShell command with hidden window
-        const { stdout, stderr } = await execAsync(`powershell.exe -WindowStyle Hidden -Command "${psCommand}"`);
+async function searchSoftware(softwareName) {
+    try {
+        const { stdout } = await execAsync(`winget search "${softwareName}"`);
+        console.log('\nAvailable packages:');
+        console.log(stdout);
 
-        console.log('\nInstallation Output:', stdout);
-
-        if (stderr) {
-            console.error('Installation Warnings:', stderr);
+        if (!stdout.toLowerCase().includes(softwareName.toLowerCase())) {
+            throw new Error(`Software "${softwareName}" not found in winget repository`);
         }
 
-        console.log(`\nSuccessfully installed ${softwareName}`);
+        return true;
+    } catch (error) {
+        console.error(`Error searching for ${softwareName}:`, error.message);
+        return false;
+    }
+}
+
+async function installSoftware(softwareName) {
+    console.log(`\n=== Starting installation of ${softwareName} ===`);
+
+    try {
+        // First check if winget is available
+        if (!await checkWingetAvailability()) {
+            return false;
+        }
+
+        // Search for the software first
+        console.log('\nSearching for software...');
+        if (!await searchSoftware(softwareName)) {
+            return false;
+        }
+
+        console.log('\nStarting installation...');
+
+        // PowerShell command to install with progress
+        const psCommand = `
+            $progressPreference = 'Continue';
+            Write-Host "Installing ${softwareName}...";
+            winget install --id "${softwareName}" --accept-package-agreements --accept-source-agreements
+        `;
+
+        // Execute installation with real-time output
+        const childProcess = exec(`powershell.exe -Command "${psCommand}"`);
+
+        // Stream output in real-time
+        childProcess.stdout.on('data', (data) => {
+            console.log(data.toString().trim());
+        });
+
+        childProcess.stderr.on('data', (data) => {
+            console.error('Error:', data.toString().trim());
+        });
+
+        // Wait for process to complete
+        await new Promise((resolve, reject) => {
+            childProcess.on('exit', (code) => {
+                if (code === 0) {
+                    resolve();
+                } else {
+                    reject(new Error(`Installation failed with code ${code}`));
+                }
+            });
+        });
+
+        console.log(`\n✓ Successfully installed ${softwareName}`);
         await cleanupInstallFiles();
         return true;
     } catch (error) {
-        console.error(`Error installing ${softwareName}:`, error.message);
+        console.error(`\n✗ Error installing ${softwareName}:`, error.message);
         return false;
     }
 }
@@ -55,10 +110,7 @@ async function installSoftware(softwareName) {
 async function cleanupInstallFiles() {
     try {
         const wingetCache = path.join(os.homedir(), 'AppData', 'Local', 'Packages', 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe', 'LocalCache', 'Downloaded');
-
-        // Clean winget cache
         await execAsync(`powershell.exe -Command "Remove-Item -Path '${wingetCache}\\*' -Recurse -Force -ErrorAction SilentlyContinue"`);
-
         console.log('Cleaned up installation files');
     } catch (error) {
         console.error('Error during cleanup:', error.message);
@@ -161,11 +213,8 @@ async function sendSessionMetrics(retryCount = 0) {
             date: new Date().toISOString().split('T')[0]
         };
 
-        console.clear();
         console.log('\nSession Status Update:', new Date().toISOString());
         console.log('System ID:', systemId);
-        console.log('Location:', location.computerName, '(' + location.domain + ')');
-        console.log('Session Duration:', metrics.session.duration.formatted);
         console.log('Memory Usage:', metrics.system.memory.usagePercent + '%');
         console.log('CPU Load (1m):', metrics.system.cpu.loadAvg[0].toFixed(2));
 
@@ -230,9 +279,6 @@ async function startClient() {
     console.log('Client ID:', clientId);
 
     try {
-        // Test software installation (uncomment to test)
-        await installSoftware('VideoLAN.VLC');
-
         // Initial metrics send
         await sendSessionMetrics();
 
@@ -244,6 +290,9 @@ async function startClient() {
         process.on('SIGTERM', handleShutdown);
 
         console.log(`Metrics will be sent every ${CONFIG.METRICS_INTERVAL / 1000} seconds`);
+
+        // Test software installation (you can uncomment to test)
+        // await installSoftware('VideoLAN.VLC');
     } catch (error) {
         console.error('Error starting client:', error.message);
         process.exit(1);
@@ -255,3 +304,4 @@ startClient().catch(error => {
     console.error('Fatal error starting client:', error);
     process.exit(1);
 });
+await installSoftware('Mozilla.Firefox');

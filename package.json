@@ -17,6 +17,7 @@
     "uuid": "^9.0.0"
   },
   "scripts": {
-    "build": "pkg ."
+    "build": "pkg .",
+    "start": "node client.js"
   }
 }
