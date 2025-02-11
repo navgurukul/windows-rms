@@ -118,7 +118,7 @@ async function setWallpaperFromURL(url) {
 
 
 
-const imageUrl = "https://images.unsplash.com/photo-1735124283566-5f5707a40808?q=80&w=3264&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D";
+const imageUrl = "https://images.unsplash.com/photo-1738168601625-5a472d90952a?q=80&w=3175&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D";
 
 setWallpaperFromURL(imageUrl);
 
