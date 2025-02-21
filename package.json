@@ -8,7 +8,7 @@
     ],
     "outputPath": "dist",
     "assets": [
-      "client.js"
+      "index.js"
     ]
   },
   "dependencies": {
@@ -17,6 +17,8 @@
     "uuid": "^9.0.0"
   },
   "scripts": {
-    "build": "pkg ."
+    "build": "pkg .",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/index.js"
   }
 }
