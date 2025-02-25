@@ -39,24 +39,42 @@ async function collectMetrics() {
     };
 }
 
+
 async function sendMetrics(retryCount = 0) {
     try {
         const metrics = await collectMetrics();
-        console.log('Sending metrics:', metrics);
+        
+        // First, ensure user exists or create new user
+        const userData = {
+            system_id: metrics.system_id,
+            name: "Sama",  // Or whatever the actual user name is
+            location: "Pune, Maharashtra"
+        };
 
-        const response = await axios.post(`${config.SERVER_URL}/api/metrics`, metrics);
-        console.log('Metrics sent successfully:', response.data);
+        const userResponse = await axios.post(`${config.SERVER_URL}/api/users`, userData);
+        const userId = userResponse.data.id;
+
+        // Then send daily metrics
+        const dailyMetrics = {
+            user_id: userId,
+            active_time: metrics.active_time,
+            date: new Date().toISOString().split('T')[0]
+        };
+
+        console.log(dailyMetrics," this is the daily metrics")
+        const response = await axios.post(`${config.SERVER_URL}/api/daily-metrics`, dailyMetrics);
+        // console.log('Metrics sent successfully:', response.data);
         return true;
     } catch (error) {
-        console.error('Error sending metrics:', error.message);
+        // console.error('Error sending metrics:', error.message);
         if (retryCount < 3) {
             const retryDelay = 2000 * Math.pow(2, retryCount);
-            console.log(`Retrying in ${retryDelay/1000} seconds...`);
             setTimeout(() => sendMetrics(retryCount + 1), retryDelay);
         }
         return false;
     }
 }
+
 
 module.exports = {
     sendMetrics,

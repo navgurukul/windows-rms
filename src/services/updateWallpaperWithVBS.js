@@ -191,7 +191,7 @@ const setWallpaper = async (url) => {
 };
 
 // Example usage
-setWallpaper('https://images.unsplash.com/photo-1542332213-9b5a5a3fad35?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')
+setWallpaper('https://plus.unsplash.com/premium_photo-1730157453240-4e56cb9d4bb9?q=80&w=3173&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')
     .then(({ wallpaperPath, vbsPath }) => {
         console.log('Process completed');
         console.log('Wallpaper saved at:', wallpaperPath);
