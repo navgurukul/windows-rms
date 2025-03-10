@@ -1,7 +1,7 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const config = require('./config/config');
-const { sendMetrics, sendFinalMetrics, clientId, systemId } = require('./services/metricService');
+const { initializeDb, sendMetrics, sendFinalMetrics, systemId } = require('./services/metricService');
 
 // Keep a global reference of the window object to prevent it from being garbage collected
 let mainWindow;
@@ -12,13 +12,17 @@ async function startMetricsCollection() {
   console.log('System ID:', systemId);
 
   try {
+    // Initialize database first
+    await initializeDb();
+    console.log('Database initialized successfully');
+
     // Initial metrics send
     await sendMetrics();
 
     // Set up regular interval for sending metrics
     const metricsInterval = setInterval(sendMetrics, config.METRICS_INTERVAL);
     
-    console.log(`Metrics will be sent every ${config.METRICS_INTERVAL / 1000} seconds`);
+    console.log(`Metrics will be saved to database every ${config.METRICS_INTERVAL / 1000} seconds`);
     
     // Return the interval so it can be cleared later if needed
     return metricsInterval;
@@ -92,4 +96,4 @@ app.on('before-quit', async (event) => {
 
 // Handle process termination signals
 process.on('SIGINT', handleShutdown);
-process.on('SIGTERM', handleShutdown);
+process.on('SIGTERM', handleShutdown);  
