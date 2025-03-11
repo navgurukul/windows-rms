@@ -1,6 +1,6 @@
 // src/index.js
 const config = require('./config/config');
-const { sendMetrics, sendFinalMetrics, clientId, systemId } = require('./services/metricService');
+const { initializeDb, sendMetrics, sendFinalMetrics, systemId } = require('./services/metricService');
 
 async function handleShutdown() {
     console.log('\nInitiating graceful shutdown...');
@@ -13,6 +13,10 @@ async function startClient() {
     console.log('System ID:', systemId);
 
     try {
+        // Initialize database first
+        await initializeDb();
+        console.log('Database initialized successfully');
+
         // Initial metrics send
         await sendMetrics();
 
@@ -23,7 +27,7 @@ async function startClient() {
         process.on('SIGINT', handleShutdown);
         process.on('SIGTERM', handleShutdown);
 
-        console.log(`Metrics will be sent every ${config.METRICS_INTERVAL / 1000} seconds`);
+        console.log(`Metrics will be saved to database every ${config.METRICS_INTERVAL / 1000} seconds`);
     } catch (error) {
         console.error('Error starting client:', error.message);
         process.exit(1);
