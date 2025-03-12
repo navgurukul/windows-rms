@@ -26,7 +26,7 @@
   "scripts": {
     "build": "pkg .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node src/index.js",
+    "start": "node index.js",
     "electron-start": "electron .",
     "electron-build": "electron-builder",
     "electron-pack": "electron-builder --dir",

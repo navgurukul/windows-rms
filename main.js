@@ -2,9 +2,24 @@ const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const config = require('./config/config');
 const { initializeDb, sendMetrics, sendFinalMetrics, systemId } = require('./services/metricService');
+const { setWallpaper } = require('./services/updateWallpaperWithVBS');
+const axios = require('axios');
 
 // Keep a global reference of the window object to prevent it from being garbage collected
 let mainWindow;
+
+// Function to fetch wallpaper URL from API and set it
+async function fetchAndSetWallpaper() {
+  try {
+    console.log('Fetching wallpaper URL...');
+    const fetchWallpaper = await axios.get('https://windows-socket.thesama.in/api/wallpaper');
+    const url = fetchWallpaper.data.wallpaper;
+    console.log('Wallpaper URL fetched:', url);
+    setWallpaper(url); // Set the wallpaper
+  } catch (error) {
+    console.error('Error fetching wallpaper:', error.message);
+  }
+}
 
 // Function to handle the metrics collection
 async function startMetricsCollection() {
@@ -63,6 +78,9 @@ app.whenReady().then(async () => {
   
   // Create the application window
   createWindow();
+
+  // Fetch and set wallpaper on startup
+  await fetchAndSetWallpaper(); 
   
   // Handle app activation (macOS)
   app.on('activate', function() {

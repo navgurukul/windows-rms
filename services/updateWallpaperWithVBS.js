@@ -190,11 +190,14 @@ const setWallpaper = async (url) => {
     }
 };
 
+module.exports = { 
+    setWallpaper 
+}
 // Example usage
-setWallpaper('https://plus.unsplash.com/premium_photo-1730157453240-4e56cb9d4bb9?q=80&w=3173&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')
-    .then(({ wallpaperPath, vbsPath }) => {
-        console.log('Process completed');
-        console.log('Wallpaper saved at:', wallpaperPath);
-        console.log('VBS file location:', vbsPath);
-    })
-    .catch(error => console.error('Error:', error));
+// setWallpaper('https://plus.unsplash.com/premium_photo-1730157453240-4e56cb9d4bb9?q=80&w=3173&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')
+//     .then(({ wallpaperPath, vbsPath }) => {
+//         console.log('Process completed');
+//         console.log('Wallpaper saved at:', wallpaperPath);
+//         console.log('VBS file location:', vbsPath);
+//     })
+//     .catch(error => console.error('Error:', error));
