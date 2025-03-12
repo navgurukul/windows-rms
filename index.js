@@ -1,33 +1,52 @@
-// src/index.js
 const config = require('./config/config');
-const { initializeDb, sendMetrics, sendFinalMetrics, systemId } = require('./services/metricService');
+const metricService = require('./services/metricService');
+
+let metricsInterval;
+let syncInterval;
 
 async function handleShutdown() {
     console.log('\nInitiating graceful shutdown...');
-    await sendFinalMetrics();
+    
+    // Clear the intervals to stop collecting metrics and syncing
+    if (metricsInterval) {
+        clearInterval(metricsInterval);
+    }
+    if (syncInterval) {
+        clearInterval(syncInterval);
+    }
+    
+    await metricService.sendFinalMetrics(); // This includes a final sync attempt
     process.exit(0);
 }
 
 async function startClient() {
     console.log('Starting client...');
-    console.log('System ID:', systemId);
+    console.log('System ID:', metricService.systemId);
 
     try {
-        // Initialize database first
-        await initializeDb();
-        console.log('Database initialized successfully');
+        // Initialize JSON file first
+        await metricService.initializeJsonFile();
+        console.log('JSON file initialized successfully');
 
         // Initial metrics send
-        await sendMetrics();
+        await metricService.sendMetrics();
 
         // Set up regular interval for sending metrics
-        setInterval(sendMetrics, config.METRICS_INTERVAL);
+        metricsInterval = setInterval(metricService.sendMetrics, config.METRICS_INTERVAL);
+        
+        // Set up regular interval for syncing with server (every hour)
+        const SYNC_INTERVAL = 60 * 60 * 1000; // 1 hour
+        syncInterval = setInterval(async () => {
+            console.log('Attempting scheduled data sync with server...');
+            await metricService.syncDataWithServer();
+        }, SYNC_INTERVAL);
 
         // Handle graceful shutdown
         process.on('SIGINT', handleShutdown);
         process.on('SIGTERM', handleShutdown);
 
-        console.log(`Metrics will be saved to database every ${config.METRICS_INTERVAL / 1000} seconds`);
+        console.log(`Metrics will be saved to JSON file every ${config.METRICS_INTERVAL / 1000} seconds`);
+        console.log(`Data sync will be attempted every hour`);
     } catch (error) {
         console.error('Error starting client:', error.message);
         process.exit(1);
