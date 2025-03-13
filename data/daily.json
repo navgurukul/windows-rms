@@ -1,12 +1,12 @@
 {
-  "username": "sama",
-  "system_id": "DESKTOP-BM6EKK9",
-  "mac_address": "9c:fc:e8:d5:f7:28",
-  "serial_number": "Unknown",
-  "active_time": 15480,
+  "username": "SAMA",
+  "system_id": "DESKTOP-0TISBHE",
+  "mac_address": "2c:db:07:ab:26:51",
+  "serial_number": "5CG0519RX3",
+  "active_time": 61080,
   "latitude": 18.5211,
   "longitude": 73.8502,
   "location_name": "Pune, Maharashtra, India",
   "date": "2025-03-13T00:00:00.000Z",
-  "last_updated": "2025-03-13T09:41:51.669Z"
+  "last_updated": "2025-03-13T09:15:33.533Z"
 }
