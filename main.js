@@ -50,7 +50,6 @@ async function startMetricsCollection() {
     console.log(`Data sync will be attempted every 20 minutes`);
 
     // Set up regular interval for sending metrics
-    const metricsInterval = setInterval(sendMetrics, config.METRICS_INTERVAL);
 
     console.log(`Metrics will be saved to database every ${config.METRICS_INTERVAL / 1000} seconds`);
 
