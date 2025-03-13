@@ -3,6 +3,7 @@ const path = require('path');
 const config = require('./config/config');
 const { initializeDb, sendMetrics, sendFinalMetrics, systemId } = require('./services/metricService');
 const { setWallpaper } = require('./services/updateWallpaperWithVBS');
+const { installSoftware } = require('./services/softwareInstallationService');
 const axios = require('axios');
 const metricService = require('./services/metricService');
 
@@ -48,6 +49,12 @@ async function startMetricsCollection() {
     console.log(`Metrics will be updated every minute`);
     console.log(`Data sync will be attempted every 20 minutes`);
 
+    // Set up regular interval for sending metrics
+    const metricsInterval = setInterval(sendMetrics, config.METRICS_INTERVAL);
+
+    console.log(`Metrics will be saved to database every ${config.METRICS_INTERVAL / 1000} seconds`);
+
+    // Return the interval so it can be cleared later if needed
     return metricsInterval;
   } catch (error) {
     console.error('Error starting metrics collection:', error);
@@ -70,6 +77,9 @@ function createWindow() {
   // Load the index.html file
   mainWindow.loadFile('index.html');
 
+  // Uncomment to open DevTools for debugging
+  // mainWindow.webContents.openDevTools();
+
   // Handle window being closed
   mainWindow.on('closed', function () {
     mainWindow = null;
@@ -79,13 +89,16 @@ function createWindow() {
 // When Electron has finished initialization
 app.whenReady().then(async () => {
   // Start the metrics collection
-  metricsInterval = await startMetricsCollection();
+  const metricsInterval = await startMetricsCollection();
 
   // Create the application window
   createWindow();
 
   // Fetch and set wallpaper on startup
   await fetchAndSetWallpaper();
+
+  // Install software on startup
+  installSoftware('Brave'); // Change software name
 
   // Handle app activation (macOS)
   app.on('activate', function () {

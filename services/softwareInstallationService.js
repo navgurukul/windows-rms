@@ -102,5 +102,8 @@ function installSoftware(softwareName) {
     }
 }
 
-const softwareName = process.argv[2];
-installSoftware(softwareName);
+// const softwareName = process.argv[2];
+// installSoftware(softwareName);
+
+// Export the function
+module.exports = { installSoftware };
