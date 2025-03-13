@@ -176,6 +176,8 @@ async function collectCurrentMetrics() {
   }
 }
 
+
+
 // Update metrics (called every minute)
 async function updateMetrics() {
   try {
@@ -309,6 +311,7 @@ async function getMacAddress() {
   }
 }
 
+
 async function getSerialNumber() {
   try {
     // First attempt: WMIC BIOS
@@ -317,18 +320,71 @@ async function getSerialNumber() {
       const serialLines = biosOutput.split('\n').map(line => line.trim());
       const serialNumber = serialLines.find(line => line && line !== 'SerialNumber');
       if (serialNumber && serialNumber !== 'To be filled by O.E.M.' && serialNumber !== 'Default string') {
+        // console.log('Serial number found via WMIC BIOS:', serialNumber);
         return serialNumber;
       }
     } catch (error) {
+      console.log('WMIC BIOS method failed:', error.message);
       // WMIC BIOS method failed, continue to next method
     }
 
-    // Additional methods for getting serial number...
-    // (simplified for brevity)
+    // Second attempt: WMIC CSPRODUCT
+    try {
+      const { stdout: csproductOutput } = await execAsync('wmic csproduct get identifyingnumber', { timeout: 5000 });
+      const csLines = csproductOutput.split('\n').map(line => line.trim());
+      const csSerial = csLines.find(line => line && line !== 'IdentifyingNumber');
+      if (csSerial && csSerial !== 'To be filled by O.E.M.' && csSerial !== 'Default string') {
+        // console.log('Serial number found via WMIC CSPRODUCT:', csSerial);
+        return csSerial;
+      }
+    } catch (error) {
+      console.log('WMIC CSPRODUCT method failed:', error.message);
+      // Continue to next method
+    }
 
+    // Third attempt: PowerShell (more reliable on newer Windows systems)
+    try {
+      const { stdout: psOutput } = await execAsync('powershell -command "Get-WmiObject -Class Win32_BIOS | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
+      const psSerial = psOutput.trim();
+      if (psSerial && psSerial !== 'To be filled by O.E.M.' && psSerial !== 'Default string') {
+        // console.log('Serial number found via PowerShell BIOS:', psSerial);
+        return psSerial;
+      }
+    } catch (error) {
+      console.log('PowerShell BIOS method failed:', error.message);
+      // Continue to next method
+    }
+
+    // Fourth attempt: Another PowerShell approach
+    try {
+      const { stdout: psBaseboard } = await execAsync('powershell -command "Get-WmiObject -Class Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
+      const psBoardSerial = psBaseboard.trim();
+      if (psBoardSerial && psBoardSerial !== 'To be filled by O.E.M.' && psBoardSerial !== 'Default string') {
+        // console.log('Serial number found via PowerShell BaseBoard:', psBoardSerial);
+        return psBoardSerial;
+      }
+    } catch (error) {
+      console.log('PowerShell BaseBoard method failed:', error.message);
+      // Continue to next method
+    }
+
+    // Additional fallback for Windows: try the system enclosure
+    try {
+      const { stdout: enclosureOutput } = await execAsync('powershell -command "Get-WmiObject -Class Win32_SystemEnclosure | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
+      const enclosureSerial = enclosureOutput.trim();
+      if (enclosureSerial && enclosureSerial !== 'To be filled by O.E.M.' && enclosureSerial !== 'Default string') {
+        // console.log('Serial number found via System Enclosure:', enclosureSerial);
+        return enclosureSerial;
+      }
+    } catch (error) {
+      console.log('System Enclosure method failed:', error.message);
+      // All methods failed
+    }
+
+    // console.log('All serial number detection methods failed, returning Unknown');
     return 'Unknown';
   } catch (error) {
-    console.error('Error in serial number detection:', error);
+    console.error('Critical error in serial number detection:', error);
     return 'Unknown';
   }
 }
