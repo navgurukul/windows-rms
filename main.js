@@ -4,9 +4,12 @@ const config = require('./config/config');
 const { initializeDb, sendMetrics, sendFinalMetrics, systemId } = require('./services/metricService');
 const { setWallpaper } = require('./services/updateWallpaperWithVBS');
 const axios = require('axios');
+const metricService = require('./services/metricService');
 
-// Keep a global reference of the window object to prevent it from being garbage collected
+// Keep a global reference of the window object
 let mainWindow;
+let metricsInterval;
+let syncInterval;
 
 // Function to fetch wallpaper URL from API and set it
 async function fetchAndSetWallpaper() {
@@ -24,25 +27,30 @@ async function fetchAndSetWallpaper() {
 // Function to handle the metrics collection
 async function startMetricsCollection() {
   console.log('Starting metrics collection...');
-  console.log('System ID:', systemId);
+  console.log('System ID:', metricService.systemId);
 
   try {
-    // Initialize database first
-    await initializeDb();
-    console.log('Database initialized successfully');
+    // Initialize files first
+    await metricService.initializeFiles();
+    console.log('Files initialized successfully');
 
-    // Initial metrics send
-    await sendMetrics();
+    // Set up regular interval for updating metrics - every minute
+    const METRICS_INTERVAL = 60 * 1000; // 1 minute
+    metricsInterval = setInterval(metricService.updateMetrics, METRICS_INTERVAL);
 
-    // Set up regular interval for sending metrics
-    const metricsInterval = setInterval(sendMetrics, config.METRICS_INTERVAL);
-    
-    console.log(`Metrics will be saved to database every ${config.METRICS_INTERVAL / 1000} seconds`);
-    
-    // Return the interval so it can be cleared later if needed
+    // Set up regular interval for syncing with server - every 20 minutes
+    const SYNC_INTERVAL = 20 * 60 * 1000; // 20 minutes
+    syncInterval = setInterval(async () => {
+      console.log('Attempting scheduled data sync with server...');
+      await metricService.syncData();
+    }, SYNC_INTERVAL);
+
+    console.log(`Metrics will be updated every minute`);
+    console.log(`Data sync will be attempted every 20 minutes`);
+
     return metricsInterval;
   } catch (error) {
-    console.error('Error starting metrics collection:', error.message);
+    console.error('Error starting metrics collection:', error);
     return null;
   }
 }
@@ -50,8 +58,8 @@ async function startMetricsCollection() {
 // Create the main application window
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    show:false,
+    skipTaskbar: true,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -61,12 +69,9 @@ function createWindow() {
 
   // Load the index.html file
   mainWindow.loadFile('index.html');
-  
-  // Uncomment to open DevTools for debugging
-  // mainWindow.webContents.openDevTools();
-  
+
   // Handle window being closed
-  mainWindow.on('closed', function() {
+  mainWindow.on('closed', function () {
     mainWindow = null;
   });
 }
@@ -74,16 +79,16 @@ function createWindow() {
 // When Electron has finished initialization
 app.whenReady().then(async () => {
   // Start the metrics collection
-  const metricsInterval = await startMetricsCollection();
-  
+  metricsInterval = await startMetricsCollection();
+
   // Create the application window
   createWindow();
 
   // Fetch and set wallpaper on startup
-  await fetchAndSetWallpaper(); 
-  
+  await fetchAndSetWallpaper();
+
   // Handle app activation (macOS)
-  app.on('activate', function() {
+  app.on('activate', function () {
     if (mainWindow === null) createWindow();
   });
 });
@@ -92,7 +97,15 @@ app.whenReady().then(async () => {
 async function handleShutdown() {
   console.log('\nInitiating graceful shutdown...');
   try {
-    await sendFinalMetrics();
+    // Clear the intervals to stop collecting metrics and syncing
+    if (metricsInterval) {
+      clearInterval(metricsInterval);
+    }
+    if (syncInterval) {
+      clearInterval(syncInterval);
+    }
+
+    await metricService.sendFinalMetrics(); // This includes a final sync attempt
     app.quit();
   } catch (error) {
     console.error('Error during shutdown:', error);
@@ -101,7 +114,7 @@ async function handleShutdown() {
 }
 
 // Handle all windows being closed
-app.on('window-all-closed', async function() {
+app.on('window-all-closed', async function () {
   await handleShutdown();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -114,4 +127,4 @@ app.on('before-quit', async (event) => {
 
 // Handle process termination signals
 process.on('SIGINT', handleShutdown);
-process.on('SIGTERM', handleShutdown);  
+process.on('SIGTERM', handleShutdown);
