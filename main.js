@@ -97,7 +97,7 @@ app.whenReady().then(async () => {
   await fetchAndSetWallpaper();
 
   // Install software on startup
-  installSoftware('Brave'); // Change software name
+  // installSoftware('Brave'); // Change software name
 
   // Handle app activation (macOS)
   app.on('activate', function () {
