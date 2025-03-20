@@ -28,7 +28,7 @@ async function fetchAndSetWallpaper() {
 // Function to handle the metrics collection
 async function startMetricsCollection() {
   console.log('Starting metrics collection...');
-  console.log('System ID:', metricService.systemId);
+  // console.log('System ID:', metricService.systemId);
 
   try {
     // Initialize files first
