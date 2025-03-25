@@ -1,6 +1,6 @@
 {
   "name": "windows-rms-client",
-  "version": "2.0.0",
+  "version": "1.0.1",
   "description": "Windows RMS Client Application",
   "main": "main.js",
   "scripts": {
@@ -8,7 +8,8 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder --windows",
     "build-win": "electron-builder --windows --x64",
-    "build-win-no-sign": "electron-builder --windows --x64 --config.win.signAndEditExecutable=false"
+    "build-win-no-sign": "electron-builder --windows --x64 --config.win.signAndEditExecutable=false",
+    "publish": "electron-builder --win --publish always"
   },
   "dependencies": {
     "auto-launch": "^5.0.5",
@@ -66,8 +67,9 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "komalahire",
-        "repo": "windows-rms"
+        "owner": "navgurukul",
+        "repo": "windows-rms",
+        "private": true
       }
     ]
   }
