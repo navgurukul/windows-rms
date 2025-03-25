@@ -7,10 +7,17 @@ const { installSoftware } = require('./services/softwareInstallationService');
 const axios = require('axios');
 const metricService = require('./services/metricService');
 
+const { 
+  initAutoUpdater, 
+  checkForUpdatesAndNotify, 
+  setupAutoUpdateChecks 
+} = require('./services/autoUpdater');
+
 // Keep a global reference of the window object
 let mainWindow;
 let metricsInterval;
 let syncInterval;
+let updateCheckInterval;
 
 // Function to fetch wallpaper URL from API and set it
 async function fetchAndSetWallpaper() {
@@ -50,7 +57,6 @@ async function startMetricsCollection() {
     console.log(`Data sync will be attempted every 20 minutes`);
 
     // Set up regular interval for sending metrics
-
     console.log(`Metrics will be saved to database every ${config.METRICS_INTERVAL / 1000} seconds`);
 
     // Return the interval so it can be cleared later if needed
@@ -64,7 +70,7 @@ async function startMetricsCollection() {
 // Create the main application window
 function createWindow() {
   mainWindow = new BrowserWindow({
-    show:false,
+    show: false,
     skipTaskbar: true,
     webPreferences: {
       nodeIntegration: true,
@@ -87,6 +93,15 @@ function createWindow() {
 
 // When Electron has finished initialization
 app.whenReady().then(async () => {
+  // Initialize auto-updater
+  initAutoUpdater();
+  
+  // Check for updates on startup
+  checkForUpdatesAndNotify();
+  
+  // Setup regular checks for updates (every hour)
+  updateCheckInterval = setupAutoUpdateChecks();
+  
   // Start the metrics collection
   const metricsInterval = await startMetricsCollection();
 
@@ -109,12 +124,15 @@ app.whenReady().then(async () => {
 async function handleShutdown() {
   console.log('\nInitiating graceful shutdown...');
   try {
-    // Clear the intervals to stop collecting metrics and syncing
+    // Clear the intervals
     if (metricsInterval) {
       clearInterval(metricsInterval);
     }
     if (syncInterval) {
       clearInterval(syncInterval);
+    }
+    if (updateCheckInterval) {
+      clearInterval(updateCheckInterval);
     }
 
     await metricService.sendFinalMetrics(); // This includes a final sync attempt

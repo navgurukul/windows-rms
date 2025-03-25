@@ -1,8 +1,16 @@
 const config = require('./config/config');
 const metricService = require('./services/metricService');
 
+
+const { 
+  initAutoUpdater, 
+  checkForUpdatesAndNotify, 
+  setupAutoUpdateChecks 
+} = require('./autoUpdater');
+
 let metricsInterval;
 let syncInterval;
+let updateCheckInterval;
 
 async function handleShutdown() {
     console.log('\nInitiating graceful shutdown...');
@@ -14,6 +22,9 @@ async function handleShutdown() {
     if (syncInterval) {
         clearInterval(syncInterval);
     }
+    if (updateCheckInterval) {
+        clearInterval(updateCheckInterval);
+    }
     
     await metricService.sendFinalMetrics(); // This includes a final sync attempt
     process.exit(0);
@@ -24,6 +35,15 @@ async function startClient() {
     console.log('System ID:', metricService.systemId);
 
     try {
+        // Initialize auto-updater
+        initAutoUpdater();
+        
+        // Check for updates on startup
+        checkForUpdatesAndNotify();
+        
+        // Setup regular checks for updates (every hour)
+        updateCheckInterval = setupAutoUpdateChecks();
+        
         // Initialize JSON file first
         await metricService.initializeJsonFile();
         console.log('JSON file initialized successfully');
