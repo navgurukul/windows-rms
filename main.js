@@ -36,7 +36,7 @@ async function startMetricsCollection() {
     console.log('Files initialized successfully');
 
     // Set up regular interval for updating metrics - every minute
-    const METRICS_INTERVAL = 60 * 1000; // 1 minute
+    const METRICS_INTERVAL = 6 * 1000; // 1 minute
     metricsInterval = setInterval(metricService.updateMetrics, METRICS_INTERVAL);
 
     // Set up regular interval for syncing with server - every 20 minutes

@@ -1,5 +1,5 @@
 Dim WallpaperPath
-WallpaperPath = "C:\Users\SAMA\Downloads\Wallpapers\wallpaper-1742459895722.jpg"
+WallpaperPath = "C:\Users\sama\Downloads\Wallpapers\wallpaper-1742888251569.jpg"
 
 ' Create WScript Shell object
 Set WshShell = WScript.CreateObject("WScript.Shell")
