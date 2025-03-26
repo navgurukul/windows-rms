@@ -17,8 +17,9 @@ const BACKEND_SINGLE_URL = 'https://windows-socket.thesama.in/api/tracking/sync'
 // Initialize variables
 const sessionStartTime = Date.now();
 const systemId = os.hostname() || 'UNKNOWN-SYSTEM';
-let totalActiveTime = 0;
+let totalActiveTime = 0; // Tracks values 1-5 for display in daily.json
 let lastSyncTime = 0;
+let backendTotalTime = 0; // Internal variable to track increments of 5 for the backend
 
 // Ensure data directory exists
 async function ensureDirectoryExists() {
@@ -30,23 +31,45 @@ async function ensureDirectoryExists() {
   }
 }
 
-// Initialize files if they don't exist
 async function initializeFiles() {
   try {
     await ensureDirectoryExists();
     
-    // Try to create daily.json if it doesn't exist
+    // Set totalActiveTime to 1 (always start fresh)
+    totalActiveTime = 1;
+    
+    // Ensure history.json exists
+    try {
+      await fs.access(HISTORY_JSON_FILE);
+    } catch (error) {
+      // File doesn't exist, create it
+      const emptyHistory = { records: [] };
+      await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(emptyHistory, null, 2));
+      console.log('Created new history.json file');
+    }
+    
+    // Check for date change first
+    await checkDateChange();
+    
+    // Create daily.json if it doesn't exist, or reset it if it has a large value
     try {
       await fs.access(DAILY_JSON_FILE);
-      // File exists, try to load active time
+      // File exists, check if it has an abnormally large value
       try {
         const data = await fs.readFile(DAILY_JSON_FILE, 'utf8');
         const dailyData = JSON.parse(data);
-        if (dailyData && dailyData.active_time) {
-          totalActiveTime = dailyData.active_time;
+        
+        if (dailyData && dailyData.active_time && dailyData.active_time > 5) {
+          console.log('Found large active_time value, resetting to 1');
+          // Reset the file with new data
+          const newData = await collectCurrentMetrics();
+          await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(newData, null, 2));
         }
       } catch (error) {
         console.error('Error parsing daily.json:', error);
+        // Create new file on error
+        const initialData = await collectCurrentMetrics();
+        await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(initialData, null, 2));
       }
     } catch (error) {
       // File doesn't exist, create it
@@ -54,21 +77,14 @@ async function initializeFiles() {
       await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(initialData, null, 2));
     }
     
-    // Try to create history.json if it doesn't exist
-    try {
-      await fs.access(HISTORY_JSON_FILE);
-    } catch (error) {
-      // File doesn't exist, create it
-      const initialHistoryData = { records: [] };
-      await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(initialHistoryData, null, 2));
+    // Try to sync immediately on startup if we have internet
+    const isConnected = await checkConnectivity();
+    if (isConnected) {
+      console.log('Internet connection detected on startup, attempting to sync');
+      await syncData();
     }
     
-    // Check if the date has changed since last run
-    await checkDateChange();
-    
-    // Initial attempt to sync data
-    setTimeout(syncData, 5000); // Wait 5 seconds before first sync attempt
-    
+    console.log('Files initialized successfully');
   } catch (error) {
     console.error('Error initializing files:', error);
     throw error;
@@ -90,46 +106,87 @@ async function checkDateChange() {
         if (dataDate !== today) {
           console.log(`Date changed from ${dataDate} to ${today}, moving data to history`);
           
-          // Format record for history file
-          const historyRecord = {
-            date: `${dataDate}T00:00:00.000Z`,
-            system_id: dailyData.system_id,
-            mac_address: dailyData.mac_address,
-            serial_number: dailyData.serial_number,
-            username: dailyData.username,
-            total_time: dailyData.active_time,
-            last_updated: dailyData.last_updated || new Date().toISOString(),
-            latitude: dailyData.latitude,
-            longitude: dailyData.longitude,
-            location_name: dailyData.location_name
-          };
+          // Only move to history if there's actual data to move
+          if (dailyData.active_time > 0) {
+            // Format record for history file
+            const historyRecord = {
+              date: `${dataDate}T00:00:00.000Z`,
+              system_id: dailyData.system_id,
+              mac_address: dailyData.mac_address,
+              serial_number: dailyData.serial_number,
+              username: dailyData.username,
+              // Use the actual accumulated time, not just 5
+              total_time: dailyData.active_time,
+              last_updated: dailyData.last_updated || new Date().toISOString(),
+              latitude: dailyData.latitude,
+              longitude: dailyData.longitude,
+              location_name: dailyData.location_name
+            };
+            
+            // Read history file
+            const historyData = await readHistoryFile();
+            
+            // Add record to history
+            historyData.records.push(historyRecord);
+            
+            // Write updated history
+            await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(historyData, null, 2));
+            
+            console.log(`Added record from ${dataDate} to history.json with ${historyRecord.total_time} minutes`);
+          }
           
-          // Read history file
-          const historyData = await readHistoryFile();
-          
-          // Add record to history
-          historyData.records.push(historyRecord);
-          
-          // Write updated history
-          await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(historyData, null, 2));
-          
-          // Reset daily data
-          totalActiveTime = 0;
+          // Reset tracking variables for the new day
+          totalActiveTime = 1;
+          backendTotalTime = 0;
           const newDailyData = await collectCurrentMetrics();
           await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(newDailyData, null, 2));
+          
+          console.log(`Created new daily.json for ${today}`);
+          
+          // Immediately attempt to sync history data when date changes
+          const isConnected = await checkConnectivity();
+          if (isConnected) {
+            console.log('Internet connection detected, attempting to sync historical data');
+            const historyData = await readHistoryFile();
+            if (historyData.records && historyData.records.length > 0) {
+              const syncSuccess = await syncBulkData(historyData);
+              if (syncSuccess) {
+                console.log('Successfully synced historical data after date change');
+              } else {
+                console.log('Failed to sync historical data after date change, will retry later');
+              }
+            }
+          }
         }
       }
     } catch (error) {
       console.error('Error checking date change:', error);
+      
+      // If we can't read the file, create a new one for today
+      totalActiveTime = 1;
+      backendTotalTime = 0;
+      const newDailyData = await collectCurrentMetrics();
+      await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(newDailyData, null, 2));
     }
   } catch (error) {
     console.error('Error in checkDateChange:', error);
   }
 }
 
-// Read history file
+// Read history file - with existence check
 async function readHistoryFile() {
   try {
+    // First check if file exists
+    try {
+      await fs.access(HISTORY_JSON_FILE);
+    } catch (error) {
+      // File doesn't exist, create an empty one
+      const emptyHistory = { records: [] };
+      await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(emptyHistory, null, 2));
+      return emptyHistory;
+    }
+    
+    // Now read the file (we know it exists)
     const data = await fs.readFile(HISTORY_JSON_FILE, 'utf8');
     const historyData = JSON.parse(data);
     
@@ -163,7 +220,7 @@ async function collectCurrentMetrics() {
       system_id: systemId,
       mac_address: macAddress,
       serial_number: serialNumber,
-      active_time: totalActiveTime,
+      active_time: totalActiveTime, // This shows current active time
       latitude: geolocation.latitude,
       longitude: geolocation.longitude,
       location_name: geolocation.location_name,
@@ -176,21 +233,41 @@ async function collectCurrentMetrics() {
   }
 }
 
-
-
-// Update metrics (called every minute)
+// Update metrics (called every minute) - with sync-dependent reset
 async function updateMetrics() {
   try {
-    // Increment active time by 60 seconds (1 minute)
-    totalActiveTime += 60;
+    // Check for date change first
+    await checkDateChange();
     
-    // Collect current metrics
+    // Increment active time by 1 minute
+    totalActiveTime += 1;
+    
+    // Check if we've reached a 5-minute interval
+    if (totalActiveTime >= 5) {
+      console.log('Reached 5-minute milestone, attempting to sync with backend');
+      
+      // Try to sync with backend
+      const syncSuccess = await syncData();
+      
+      if (syncSuccess) {
+        // Only reset if sync was successful
+        console.log('Sync successful, resetting counter to 1');
+        totalActiveTime = 1;
+        // Increment backend total only on successful sync
+        backendTotalTime += 5;
+      } else {
+        console.log('Sync failed, continuing to increment timer');
+        // Don't reset the counter, continue accumulating
+      }
+    }
+    
+    // Collect current metrics with the current totalActiveTime
     const metrics = await collectCurrentMetrics();
     
     // Write to daily file
     await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(metrics, null, 2));
     
-    console.log(`Updated metrics - Total active time: ${formatDuration(totalActiveTime * 1000)}`);
+    console.log(`Updated metrics - Current active time: ${totalActiveTime} minutes, Backend total: ${backendTotalTime} minutes`);
     return true;
   } catch (error) {
     console.error('Error updating metrics:', error);
@@ -207,6 +284,8 @@ async function syncData() {
       return false;
     }
     
+    let syncSuccessful = false;
+    
     // First check if we have history data to sync
     const historyData = await readHistoryFile();
     if (historyData.records && historyData.records.length > 0) {
@@ -214,6 +293,7 @@ async function syncData() {
       const bulkSuccess = await syncBulkData(historyData);
       if (bulkSuccess) {
         console.log('Bulk sync successful, cleared history data');
+        syncSuccessful = true;
       } else {
         console.log('Bulk sync failed');
       }
@@ -224,11 +304,13 @@ async function syncData() {
     if (singleSuccess) {
       console.log('Single sync successful');
       lastSyncTime = Date.now();
+      syncSuccessful = true;
     } else {
       console.log('Single sync failed or skipped');
     }
     
-    return true;
+    // Return overall success status - must have at least one successful sync
+    return syncSuccessful;
   } catch (error) {
     console.error('Error in syncData:', error);
     return false;
@@ -238,27 +320,29 @@ async function syncData() {
 // Sync single day's data
 async function syncSingleData() {
   try {
-    // Skip if we synced recently (within the last 10 minutes)
-    const now = Date.now();
-    if (now - lastSyncTime < 10 * 60 * 1000) { // 10 minutes
-      console.log('Skipping single sync - synced recently');
-      return true;
-    }
-    
     // Read daily data
     const data = await fs.readFile(DAILY_JSON_FILE, 'utf8');
-    const dailyData = JSON.parse(data);
+    let dailyData = JSON.parse(data);
+    
+    // Create a payload that always sends 5 minutes to the backend
+    const syncPayload = {
+      username: dailyData.username,
+      system_id: dailyData.system_id,
+      mac_address: dailyData.mac_address,
+      serial_number: dailyData.serial_number,
+      active_time: 5, // Always send exactly 5 minutes
+      latitude: dailyData.latitude,
+      longitude: dailyData.longitude,
+      location_name: dailyData.location_name,
+      date: dailyData.date,
+      last_updated: new Date().toISOString()
+    };
     
     // Send to single API
-    const response = await axios.post(BACKEND_SINGLE_URL, dailyData);
+    const response = await axios.post(BACKEND_SINGLE_URL, syncPayload);
     
-    if (response.status === 200) {
-      console.log('Successfully synced today\'s data');
-      return true;
-    } else {
-      console.error('Server responded with status:', response.status);
-      return false;
-    }
+    // Return true only if we get a 200 status
+    return response.status === 200;
   } catch (error) {
     console.error('Error in syncSingleData:', error);
     return false;
@@ -268,6 +352,12 @@ async function syncSingleData() {
 // Sync bulk historical data
 async function syncBulkData(historyData) {
   try {
+    // Ensure we have records to sync
+    if (!historyData.records || historyData.records.length === 0) {
+      console.log('No historical records to sync');
+      return true; // Return true for empty records (not a failure)
+    }
+    
     // Prepare payload exactly as needed by the API
     const payload = {
       records: historyData.records
@@ -277,7 +367,7 @@ async function syncBulkData(historyData) {
     const response = await axios.post(BACKEND_BULK_URL, payload);
     
     if (response.status === 200) {
-      console.log('Successfully synced historical data');
+      console.log(`Successfully synced ${historyData.records.length} historical records`);
       
       // Clear history after successful sync
       await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify({ records: [] }, null, 2));
@@ -311,48 +401,17 @@ async function getMacAddress() {
   }
 }
 
-
 async function getSerialNumber() {
   try {
-    // First attempt: WMIC BIOS
-    try {
-      const { stdout: biosOutput } = await execAsync('wmic bios get serialnumber', { timeout: 5000 });
-      const serialLines = biosOutput.split('\n').map(line => line.trim());
-      const serialNumber = serialLines.find(line => line && line !== 'SerialNumber');
-      if (serialNumber && serialNumber !== 'To be filled by O.E.M.' && serialNumber !== 'Default string') {
-        // console.log('Serial number found via WMIC BIOS:', serialNumber);
-        return serialNumber;
-      }
-    } catch (error) {
-      console.log('WMIC BIOS method failed:', error.message);
-      // WMIC BIOS method failed, continue to next method
-    }
-
-    // Second attempt: WMIC CSPRODUCT
-    try {
-      const { stdout: csproductOutput } = await execAsync('wmic csproduct get identifyingnumber', { timeout: 5000 });
-      const csLines = csproductOutput.split('\n').map(line => line.trim());
-      const csSerial = csLines.find(line => line && line !== 'IdentifyingNumber');
-      if (csSerial && csSerial !== 'To be filled by O.E.M.' && csSerial !== 'Default string') {
-        // console.log('Serial number found via WMIC CSPRODUCT:', csSerial);
-        return csSerial;
-      }
-    } catch (error) {
-      console.log('WMIC CSPRODUCT method failed:', error.message);
-      // Continue to next method
-    }
-
     // Third attempt: PowerShell (more reliable on newer Windows systems)
     try {
       const { stdout: psOutput } = await execAsync('powershell -command "Get-WmiObject -Class Win32_BIOS | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
       const psSerial = psOutput.trim();
       if (psSerial && psSerial !== 'To be filled by O.E.M.' && psSerial !== 'Default string') {
-        // console.log('Serial number found via PowerShell BIOS:', psSerial);
         return psSerial;
       }
     } catch (error) {
       console.log('PowerShell BIOS method failed:', error.message);
-      // Continue to next method
     }
 
     // Fourth attempt: Another PowerShell approach
@@ -360,12 +419,10 @@ async function getSerialNumber() {
       const { stdout: psBaseboard } = await execAsync('powershell -command "Get-WmiObject -Class Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
       const psBoardSerial = psBaseboard.trim();
       if (psBoardSerial && psBoardSerial !== 'To be filled by O.E.M.' && psBoardSerial !== 'Default string') {
-        // console.log('Serial number found via PowerShell BaseBoard:', psBoardSerial);
         return psBoardSerial;
       }
     } catch (error) {
       console.log('PowerShell BaseBoard method failed:', error.message);
-      // Continue to next method
     }
 
     // Additional fallback for Windows: try the system enclosure
@@ -373,15 +430,12 @@ async function getSerialNumber() {
       const { stdout: enclosureOutput } = await execAsync('powershell -command "Get-WmiObject -Class Win32_SystemEnclosure | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
       const enclosureSerial = enclosureOutput.trim();
       if (enclosureSerial && enclosureSerial !== 'To be filled by O.E.M.' && enclosureSerial !== 'Default string') {
-        // console.log('Serial number found via System Enclosure:', enclosureSerial);
         return enclosureSerial;
       }
     } catch (error) {
       console.log('System Enclosure method failed:', error.message);
-      // All methods failed
     }
 
-    // console.log('All serial number detection methods failed, returning Unknown');
     return 'Unknown';
   } catch (error) {
     console.error('Critical error in serial number detection:', error);
@@ -410,6 +464,7 @@ async function checkConnectivity() {
 
 async function getGeolocation() {
   try {
+    // Check internet connectivity
     const isConnected = await checkConnectivity();
     if (!isConnected) {
       return {
@@ -419,14 +474,47 @@ async function getGeolocation() {
       };
     }
     
-    // Try multiple geolocation services...
-    // (simplified for brevity)
+    // Try to get location from IP address using ipinfo.io
+    try {
+      const response = await axios.get('https://ipinfo.io/json');
+      
+      if (response.data && response.data.loc) {
+        // Split the coordinates string
+        const [latitude, longitude] = response.data.loc.split(',').map(coord => parseFloat(coord));
+        const locationName = `${response.data.city}, ${response.data.region}, ${response.data.country}`;
+        
+        return {
+          latitude,
+          longitude,
+          location_name: locationName
+        };
+      }
+    } catch (ipinfoError) {
+      console.error('IP geolocation failed:', ipinfoError.message);
+      
+      // Try fallback service
+      try {
+        const fallbackResponse = await axios.get('https://ipapi.co/json/');
+        
+        if (fallbackResponse.data && fallbackResponse.data.latitude) {
+          return {
+            latitude: fallbackResponse.data.latitude,
+            longitude: fallbackResponse.data.longitude,
+            location_name: `${fallbackResponse.data.city}, ${fallbackResponse.data.state}, ${fallbackResponse.data.country_name}`
+          };
+        }
+      } catch (fallbackError) {
+        console.error('Fallback geolocation failed:', fallbackError.message);
+      }
+    }
     
+    // If both services fail but we have internet, use a default location
     return {
       latitude: 18.521100,
       longitude: 73.850200,
       location_name: 'Pune, Maharashtra, India'
     };
+    
   } catch (error) {
     console.error('Critical error in geolocation function:', error);
     return {
@@ -437,22 +525,30 @@ async function getGeolocation() {
   }
 }
 
-function formatDuration(ms) {
-  const seconds = Math.floor(ms / 1000);
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainingSeconds = seconds % 60;
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+function formatDuration(minutes) {
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(remainingMinutes).padStart(2, '0')}`;
 }
 
 // Final metrics when shutting down
 async function sendFinalMetrics() {
   try {
-    // Update metrics one last time
-    await updateMetrics();
-    
-    // Try one final sync with the server
-    await syncData();
+    // If we're about to shut down, include the current active time in the backend total
+    // so we don't lose any tracked time
+    if (totalActiveTime > 1) {
+      // Try to sync one last time with whatever time we have accumulated
+      const isConnected = await checkConnectivity();
+      if (isConnected && totalActiveTime >= 5) {
+        // We have enough time accumulated to warrant a sync
+        await syncData();
+      } else if (totalActiveTime > 1) {
+        // Not enough time for a sync or no connection, save to daily.json for next startup
+        const metrics = await collectCurrentMetrics();
+        await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(metrics, null, 2));
+        console.log(`Saved final metrics with active_time: ${totalActiveTime}`);
+      }
+    }
     
     return true;
   } catch (error) {
