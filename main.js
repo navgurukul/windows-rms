@@ -6,6 +6,7 @@ const { setWallpaper } = require('./services/updateWallpaperWithVBS');
 const { installSoftware } = require('./services/softwareInstallationService');
 const axios = require('axios');
 const metricService = require('./services/metricService');
+const autoUpdater = require('./services/autoUpdaterService');
 
 // Keep a global reference of the window object
 let mainWindow;
@@ -28,7 +29,7 @@ async function fetchAndSetWallpaper() {
 // Function to handle the metrics collection
 async function startMetricsCollection() {
   console.log('Starting metrics collection...');
-  // console.log('System ID:', metricService.systemId);
+  console.log('System ID:', metricService.systemId);
 
   try {
     // Initialize files first
@@ -36,7 +37,7 @@ async function startMetricsCollection() {
     console.log('Files initialized successfully');
 
     // Set up regular interval for updating metrics - every minute
-    const METRICS_INTERVAL = 6 * 1000; // 1 minute
+    const METRICS_INTERVAL = 60 * 1000; // 1 minute
     metricsInterval = setInterval(metricService.updateMetrics, METRICS_INTERVAL);
 
     // Set up regular interval for syncing with server - every 20 minutes
@@ -50,7 +51,6 @@ async function startMetricsCollection() {
     console.log(`Data sync will be attempted every 20 minutes`);
 
     // Set up regular interval for sending metrics
-
     console.log(`Metrics will be saved to database every ${config.METRICS_INTERVAL / 1000} seconds`);
 
     // Return the interval so it can be cleared later if needed
@@ -64,7 +64,7 @@ async function startMetricsCollection() {
 // Create the main application window
 function createWindow() {
   mainWindow = new BrowserWindow({
-    show:false,
+    show: false,
     skipTaskbar: true,
     webPreferences: {
       nodeIntegration: true,
@@ -83,6 +83,8 @@ function createWindow() {
   mainWindow.on('closed', function () {
     mainWindow = null;
   });
+
+  return mainWindow;
 }
 
 // When Electron has finished initialization
@@ -91,7 +93,11 @@ app.whenReady().then(async () => {
   const metricsInterval = await startMetricsCollection();
 
   // Create the application window
-  createWindow();
+  mainWindow = createWindow();
+
+  // Start auto-updater checks (every 6 hours)
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+  autoUpdater.startPeriodicUpdateChecks(SIX_HOURS);
 
   // Fetch and set wallpaper on startup
   await fetchAndSetWallpaper();
@@ -116,6 +122,9 @@ async function handleShutdown() {
     if (syncInterval) {
       clearInterval(syncInterval);
     }
+    
+    // Stop auto updater periodic checks
+    autoUpdater.stopPeriodicUpdateChecks();
 
     await metricService.sendFinalMetrics(); // This includes a final sync attempt
     app.quit();
