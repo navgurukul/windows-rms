@@ -7,9 +7,12 @@ const os = require('os');
 
 // Constants for directory paths
 const WALLPAPERS_DIR = path.join(os.homedir(), 'Downloads', 'Wallpapers');
-const VBS_DIR = path.join(__dirname);
+const TEMP_DIR = os.tmpdir();
 const RETRY_COUNT = 5;
 const RETRY_DELAY = 1000; // 1 second
+
+// Keep track of last set wallpaper to avoid unnecessary updates
+let lastSetWallpaper = '';
 
 // Helper function for delays
 const delay = async (ms) => {
@@ -34,6 +37,12 @@ const verifyFile = async (filePath) => {
     } catch {
         return false;
     }
+};
+
+// Check if wallpaper URL is the same as the last one we set
+const isWallpaperAlreadySet = (url) => {
+    // If we have a record of the last URL and it matches the current one, skip the update
+    return lastSetWallpaper && lastSetWallpaper === url;
 };
 
 // Download image from URL
@@ -83,13 +92,14 @@ const downloadImage = async (url) => {
     });
 };
 
-// Create VBS script for wallpaper setting
-const createVBScript = async (wallpaperPath) => {
-    console.log('Creating VBScript...');
-    // Convert to Windows path format with single backslashes
-    const formattedPath = wallpaperPath.replace(/\//g, '\\');
+// Create VBS script in temp directory
+const createTempVBScript = async (wallpaperPath) => {
+    try {
+        console.log('Creating temporary VBScript...');
+        // Convert to Windows path format with single backslashes
+        const formattedPath = wallpaperPath.replace(/\//g, '\\');
 
-    const vbsContent = `Dim WallpaperPath
+        const vbsContent = `Dim WallpaperPath
 WallpaperPath = "${formattedPath}"
 
 ' Create WScript Shell object
@@ -103,17 +113,23 @@ WshShell.RegWrite "HKCU\\Control Panel\\Desktop\\TileWallpaper", "0", "REG_SZ"
 WshShell.RegWrite "HKCU\\Control Panel\\Desktop\\Wallpaper", WallpaperPath, "REG_SZ"
 
 ' Force Windows to reload the desktop
-WshShell.Run "%windir%\\System32\\RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters", 1, True`;
+WshShell.Run "%windir%\\System32\\RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters", 1, True
 
-    // Store VBS in project directory
-    const vbsPath = path.join(VBS_DIR, 'wallpaperSet.vbs');
-    await fsPromises.writeFile(vbsPath, vbsContent.replace(/\n/g, '\r\n'), 'utf8');
+' Clean up this temporary script
+CreateObject("Scripting.FileSystemObject").DeleteFile(WScript.ScriptFullName)`;
 
-    await delay(500);
-    console.log('VBScript created successfully at:', vbsPath);
-    console.log('VBS Content for inspection:');
-    console.log(vbsContent);
-    return vbsPath;
+        // Create a unique temporary file name
+        const tempVbsPath = path.join(TEMP_DIR, `wallpaper-${Date.now()}.vbs`);
+        
+        // Write the VBS content to the temp file
+        await fsPromises.writeFile(tempVbsPath, vbsContent.replace(/\n/g, '\r\n'), 'utf8');
+        
+        console.log('VBScript created in temp directory:', tempVbsPath);
+        return tempVbsPath;
+    } catch (error) {
+        console.error('Error creating temporary VBS script:', error);
+        throw error;
+    }
 };
 
 // Execute VBS script once
@@ -130,74 +146,81 @@ const executeVBScriptOnce = async (vbsPath) => {
                 reject(error);
                 return;
             }
-            if (stderr) {
-                console.log('VBScript stderr:', stderr);
-            }
-            if (stdout) {
-                console.log('VBScript stdout:', stdout);
-            }
+            
+            // Deliberately not logging stderr/stdout to keep console clean
             resolve();
         });
     });
 };
 
-// Execute VBS script multiple times with delay
+// Execute VBS script just once (reduced retry count to minimize console output)
 const executeVBScript = async (vbsPath) => {
-    console.log(`Starting ${RETRY_COUNT} attempts to set wallpaper...`);
-
-    for (let i = 0; i < RETRY_COUNT; i++) {
-        try {
-            console.log(`Attempt ${i + 1} of ${RETRY_COUNT}...`);
-            await executeVBScriptOnce(vbsPath);
-            await delay(RETRY_DELAY);
-        } catch (error) {
-            console.error(`Error in attempt ${i + 1}:`, error);
-        }
+    try {
+        await executeVBScriptOnce(vbsPath);
+        return true;
+    } catch (error) {
+        console.error('Error executing VBS script:', error.message);
+        return false;
     }
+};
 
-    console.log('All wallpaper set attempts completed');
+// Get Windows current wallpaper path
+const getCurrentWallpaper = async () => {
+    return new Promise((resolve, reject) => {
+        const command = `powershell -command "(Get-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name Wallpaper).Wallpaper"`;
+        
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                // Silently fail and return empty string
+                resolve('');
+                return;
+            }
+            
+            resolve(stdout.trim());
+        });
+    });
 };
 
 // Main function to set wallpaper
 const setWallpaper = async (url) => {
     try {
-        // Step 1: Download and verify the image
-        const wallpaperPath = await downloadImage(url);
-        console.log('Downloaded wallpaper to:', wallpaperPath);
-
-        if (!(await verifyFile(wallpaperPath))) {
-            throw new Error('Wallpaper file is invalid or missing');
+        // Skip if this is the same wallpaper URL we just set
+        if (isWallpaperAlreadySet(url)) {
+            console.log('Wallpaper already set to this URL, skipping update');
+            return { 
+                wallpaperPath: lastSetWallpaper,
+                skipped: true 
+            };
         }
-
-        await delay(1000);
-
-        // Step 2: Create the VBScript
-        const vbsPath = await createVBScript(wallpaperPath);
-
-        await delay(500);
-
-        // Step 3: Execute the VBScript automatically multiple times
+        
+        // Try to download the image
+        const wallpaperPath = await downloadImage(url);
+        
+        if (!(await verifyFile(wallpaperPath))) {
+            console.log('Wallpaper file is invalid or missing, skipping update');
+            return { skipped: true };
+        }
+        
+        // Create a temporary VBS script (always use temp location to avoid permission issues)
+        const vbsPath = await createTempVBScript(wallpaperPath);
+        
+        // Execute the VBS script
         await executeVBScript(vbsPath);
-        console.log('Wallpaper setting process completed');
-
+        
+        // Remember this wallpaper URL to avoid duplicates
+        lastSetWallpaper = url;
+        
         return {
             wallpaperPath,
-            vbsPath
+            updated: true
         };
     } catch (error) {
-        console.error('Error in setWallpaper:', error);
-        throw error;
+        // Silently handle errors - log them but don't propagate
+        console.log('Encountered issue during wallpaper update, continuing without error');
+        return { skipped: true };
     }
 };
 
 module.exports = { 
     setWallpaper 
-}
-// // Example usage
-// setWallpaper('https://plus.unsplash.com/premium_photo-1730157453240-4e56cb9d4bb9?q=80&w=3173&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')
-//     .then(({ wallpaperPath, vbsPath }) => {
-//         console.log('Process completed');
-//         console.log('Wallpaper saved at:', wallpaperPath);
-//         console.log('VBS file location:', vbsPath);
-//     })
-//     .catch(error => console.error('Error:', error));
+};
