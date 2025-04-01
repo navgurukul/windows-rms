@@ -1,6 +1,6 @@
 {
   "name": "windows-rms-client",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Windows RMS Client Application",
   "main": "main.js",
   "scripts": {
@@ -9,7 +9,7 @@
     "dist": "electron-builder --windows",
     "build-win": "electron-builder --windows --x64",
     "build-win-no-sign": "electron-builder --windows --x64 --config.win.signAndEditExecutable=false",
-    "publish": "electron-builder build --windows --publish always"
+    "publish": "electron-builder --win --x64 --publish always"
   },
   "dependencies": {
     "auto-launch": "^5.0.5",
@@ -60,7 +60,9 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "sign": null,
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": true,
