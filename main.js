@@ -19,6 +19,8 @@ async function fetchAndSetWallpaper() {
     const fetchWallpaper = await axios.get('https://windows-socket.thesama.in/api/wallpaper');
     const url = fetchWallpaper.data.wallpaper;
     console.log('Wallpaper URL fetched:', url);
+   
+   console.log('VBS script location:', require('./services/updateWallpaperWithVBS').getSystemDataFolder());
     setWallpaper(url); // Set the wallpaper
   } catch (error) {
     console.error('Error fetching wallpaper:', error.message);
