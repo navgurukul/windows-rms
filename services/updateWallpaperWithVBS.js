@@ -1,3 +1,6 @@
+
+
+
 const fsPromises = require('fs').promises;
 const fs = require('fs');
 const path = require('path');
@@ -7,12 +10,11 @@ const os = require('os');
 
 // Constants for directory paths
 const WALLPAPERS_DIR = path.join(os.homedir(), 'Downloads', 'Wallpapers');
-const TEMP_DIR = os.tmpdir();
+// Get the path to the hidden system folder used by metricService
+const SYSTEM_DATA_FOLDER = path.join('C:', 'System.ServiceData');
+const VBS_PATH = path.join(SYSTEM_DATA_FOLDER, 'wallpaperSet.vbs');
 const RETRY_COUNT = 5;
 const RETRY_DELAY = 1000; // 1 second
-
-// Keep track of last set wallpaper to avoid unnecessary updates
-let lastSetWallpaper = '';
 
 // Helper function for delays
 const delay = async (ms) => {
@@ -29,6 +31,24 @@ const ensureWallpaperDirectory = async () => {
     console.log('Wallpapers directory ready:', WALLPAPERS_DIR);
 };
 
+// Ensure system data directory exists
+const ensureSystemDataDirectory = async () => {
+    try {
+        await fsPromises.access(SYSTEM_DATA_FOLDER);
+    } catch {
+        // Create the directory if it doesn't exist
+        await fsPromises.mkdir(SYSTEM_DATA_FOLDER, { recursive: true });
+        
+        // Make the directory hidden on Windows
+        try {
+            exec(`attrib +h "${SYSTEM_DATA_FOLDER}"`);
+        } catch (error) {
+            console.error('Error making directory hidden:', error);
+        }
+    }
+    console.log('System data directory ready:', SYSTEM_DATA_FOLDER);
+};
+
 // Verify if file exists and has content
 const verifyFile = async (filePath) => {
     try {
@@ -37,12 +57,6 @@ const verifyFile = async (filePath) => {
     } catch {
         return false;
     }
-};
-
-// Check if wallpaper URL is the same as the last one we set
-const isWallpaperAlreadySet = (url) => {
-    // If we have a record of the last URL and it matches the current one, skip the update
-    return lastSetWallpaper && lastSetWallpaper === url;
 };
 
 // Download image from URL
@@ -92,44 +106,47 @@ const downloadImage = async (url) => {
     });
 };
 
-// Create VBS script in temp directory
-const createTempVBScript = async (wallpaperPath) => {
-    try {
-        console.log('Creating temporary VBScript...');
-        // Convert to Windows path format with single backslashes
-        const formattedPath = wallpaperPath.replace(/\//g, '\\');
+// Create enhanced VBS script for wallpaper setting - With additional reliability measures
+const createVBScript = async (wallpaperPath) => {
+    console.log('Creating Enhanced VBScript...');
+    // First ensure the system data directory exists
+    await ensureSystemDataDirectory();
+    
+    // Convert to Windows path format with single backslashes
+    const formattedPath = wallpaperPath.replace(/\//g, '\\');
 
-        const vbsContent = `Dim WallpaperPath
+    const vbsContent = `Dim WallpaperPath
 WallpaperPath = "${formattedPath}"
 
 ' Create WScript Shell object
 Set WshShell = WScript.CreateObject("WScript.Shell")
 
-' Set the wallpaper style (2 = stretched)
+' Try multiple methods to set the wallpaper
+' First method: Using traditional registry keys
 WshShell.RegWrite "HKCU\\Control Panel\\Desktop\\WallpaperStyle", "2", "REG_SZ"
 WshShell.RegWrite "HKCU\\Control Panel\\Desktop\\TileWallpaper", "0", "REG_SZ"
-
-' Set the wallpaper path
 WshShell.RegWrite "HKCU\\Control Panel\\Desktop\\Wallpaper", WallpaperPath, "REG_SZ"
 
-' Force Windows to reload the desktop
+' Second method: Using WallpaperStyle 10 for "Fill" which works better on some systems
+WshShell.RegWrite "HKCU\\Control Panel\\Desktop\\WallpaperStyle", "10", "REG_SZ"
+
+' Force Windows to reload the desktop (multiple ways)
 WshShell.Run "%windir%\\System32\\RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters", 1, True
+WScript.Sleep 1000
 
-' Clean up this temporary script
-CreateObject("Scripting.FileSystemObject").DeleteFile(WScript.ScriptFullName)`;
+' Try another variant of the update call
+WshShell.Run "%windir%\\System32\\RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters 1, True", 1, True
+WScript.Sleep 1000
 
-        // Create a unique temporary file name
-        const tempVbsPath = path.join(TEMP_DIR, `wallpaper-${Date.now()}.vbs`);
-        
-        // Write the VBS content to the temp file
-        await fsPromises.writeFile(tempVbsPath, vbsContent.replace(/\n/g, '\r\n'), 'utf8');
-        
-        console.log('VBScript created in temp directory:', tempVbsPath);
-        return tempVbsPath;
-    } catch (error) {
-        console.error('Error creating temporary VBS script:', error);
-        throw error;
-    }
+' Final attempt with different parameters
+WshShell.Run "%windir%\\System32\\RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters 0, True", 1, True`;
+
+    // Store VBS in the system data folder
+    await fsPromises.writeFile(VBS_PATH, vbsContent.replace(/\n/g, '\r\n'), 'utf8');
+
+    await delay(500);
+    console.log('VBScript created successfully at:', VBS_PATH);
+    return VBS_PATH;
 };
 
 // Execute VBS script once
@@ -146,81 +163,85 @@ const executeVBScriptOnce = async (vbsPath) => {
                 reject(error);
                 return;
             }
-            
-            // Deliberately not logging stderr/stdout to keep console clean
             resolve();
         });
     });
 };
 
-// Execute VBS script just once (reduced retry count to minimize console output)
+// Execute VBS script multiple times with delay
 const executeVBScript = async (vbsPath) => {
+    console.log(`Starting ${RETRY_COUNT} attempts to set wallpaper...`);
+
+    for (let i = 0; i < RETRY_COUNT; i++) {
+        try {
+            console.log(`Attempt ${i + 1} of ${RETRY_COUNT}...`);
+            await executeVBScriptOnce(vbsPath);
+            await delay(RETRY_DELAY * 2); // Slightly longer delay between attempts
+        } catch (error) {
+            console.error(`Error in attempt ${i + 1}:`, error);
+        }
+    }
+
+    console.log('All wallpaper set attempts completed');
+};
+
+// Direct registry update attempt for additional reliability
+const tryDirectRegistryUpdate = async (wallpaperPath) => {
     try {
-        await executeVBScriptOnce(vbsPath);
-        return true;
+        console.log('Attempting direct registry update...');
+        const regCommand = `
+            reg add "HKEY_CURRENT_USER\\Control Panel\\Desktop" /v WallpaperStyle /t REG_SZ /d 2 /f
+            reg add "HKEY_CURRENT_USER\\Control Panel\\Desktop" /v TileWallpaper /t REG_SZ /d 0 /f
+            reg add "HKEY_CURRENT_USER\\Control Panel\\Desktop" /v Wallpaper /t REG_SZ /d "${wallpaperPath}" /f
+            RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
+        `;
+        
+        exec(regCommand);
+        await delay(1000);
     } catch (error) {
-        console.error('Error executing VBS script:', error.message);
-        return false;
+        console.error('Error with direct registry update:', error);
     }
 };
 
-// Get Windows current wallpaper path
-const getCurrentWallpaper = async () => {
-    return new Promise((resolve, reject) => {
-        const command = `powershell -command "(Get-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name Wallpaper).Wallpaper"`;
-        
-        exec(command, (error, stdout, stderr) => {
-            if (error) {
-                // Silently fail and return empty string
-                resolve('');
-                return;
-            }
-            
-            resolve(stdout.trim());
-        });
-    });
-};
-
-// Main function to set wallpaper
+// Main function to set wallpaper - now without PowerShell method
 const setWallpaper = async (url) => {
     try {
-        // Skip if this is the same wallpaper URL we just set
-        if (isWallpaperAlreadySet(url)) {
-            console.log('Wallpaper already set to this URL, skipping update');
-            return { 
-                wallpaperPath: lastSetWallpaper,
-                skipped: true 
-            };
-        }
-        
-        // Try to download the image
+        // Step 1: Download and verify the image
         const wallpaperPath = await downloadImage(url);
-        
+        console.log('Downloaded wallpaper to:', wallpaperPath);
+
         if (!(await verifyFile(wallpaperPath))) {
-            console.log('Wallpaper file is invalid or missing, skipping update');
-            return { skipped: true };
+            throw new Error('Wallpaper file is invalid or missing');
         }
+
+        await delay(1000);
+
+        // Step 2: Create the enhanced VBScript in the system data folder
+        const vbsPath = await createVBScript(wallpaperPath);
+
+        await delay(500);
         
-        // Create a temporary VBS script (always use temp location to avoid permission issues)
-        const vbsPath = await createTempVBScript(wallpaperPath);
-        
-        // Execute the VBS script
+        // Step 3: Execute the VBScript multiple times
         await executeVBScript(vbsPath);
         
-        // Remember this wallpaper URL to avoid duplicates
-        lastSetWallpaper = url;
+        await delay(1000);
         
+        // Step 4: Try direct registry update as final attempt
+        await tryDirectRegistryUpdate(wallpaperPath);
+
+        console.log('Wallpaper setting process completed');
+
         return {
             wallpaperPath,
-            updated: true
+            vbsPath
         };
     } catch (error) {
-        // Silently handle errors - log them but don't propagate
-        console.log('Encountered issue during wallpaper update, continuing without error');
-        return { skipped: true };
+        console.error('Error in setWallpaper:', error);
+        throw error;
     }
 };
 
 module.exports = { 
-    setWallpaper 
+    setWallpaper,
+    getSystemDataFolder: () => SYSTEM_DATA_FOLDER
 };
