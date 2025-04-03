@@ -1,18 +1,18 @@
-
-
-
 const fsPromises = require('fs').promises;
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { exec } = require('child_process');
 const os = require('os');
+const crypto = require('crypto');
 
 // Constants for directory paths
 const WALLPAPERS_DIR = path.join(os.homedir(), 'Downloads', 'Wallpapers');
 // Get the path to the hidden system folder used by metricService
 const SYSTEM_DATA_FOLDER = path.join('C:', 'System.ServiceData');
 const VBS_PATH = path.join(SYSTEM_DATA_FOLDER, 'wallpaperSet.vbs');
+// New JSON file to store wallpaper history
+const WALLPAPER_CACHE_FILE = path.join(SYSTEM_DATA_FOLDER, 'wallpapers.json');
 const RETRY_COUNT = 5;
 const RETRY_DELAY = 1000; // 1 second
 
@@ -59,11 +59,89 @@ const verifyFile = async (filePath) => {
     }
 };
 
+// Create or read wallpaper cache file
+const initializeWallpaperCache = async () => {
+    try {
+        await ensureSystemDataDirectory();
+        
+        try {
+            await fsPromises.access(WALLPAPER_CACHE_FILE);
+            // File exists, read it
+            const data = await fsPromises.readFile(WALLPAPER_CACHE_FILE, 'utf8');
+            return JSON.parse(data);
+        } catch {
+            // File doesn't exist, create it
+            const initialCache = {
+                wallpapers: [],
+                current: null,
+                lastUpdated: new Date().toISOString()
+            };
+            await fsPromises.writeFile(WALLPAPER_CACHE_FILE, JSON.stringify(initialCache, null, 2));
+            return initialCache;
+        }
+    } catch (error) {
+        console.error('Error initializing wallpaper cache:', error);
+        // Return a default cache if there's an error
+        return {
+            wallpapers: [],
+            current: null,
+            lastUpdated: new Date().toISOString()
+        };
+    }
+};
+
+// Update wallpaper cache file
+const updateWallpaperCache = async (cache) => {
+    try {
+        await ensureSystemDataDirectory();
+        cache.lastUpdated = new Date().toISOString();
+        await fsPromises.writeFile(WALLPAPER_CACHE_FILE, JSON.stringify(cache, null, 2));
+        console.log('Wallpaper cache updated');
+    } catch (error) {
+        console.error('Error updating wallpaper cache:', error);
+    }
+};
+
+// Generate consistent filename from URL
+const getFilenameFromUrl = (url) => {
+    // Use hash of URL to ensure the same URL always gets the same filename
+    const urlHash = crypto.createHash('md5').update(url).digest('hex');
+    const extension = path.extname(url.split('?')[0]) || '.jpg';
+    return `wallpaper-${urlHash}${extension}`;
+};
+
+// Check if wallpaper is already downloaded
+const isWallpaperDownloaded = async (url, cache) => {
+    // Check if URL is in cache
+    const existingEntry = cache.wallpapers.find(entry => entry.url === url);
+    
+    if (existingEntry) {
+        // Check if the file actually exists
+        const exists = await verifyFile(existingEntry.filePath);
+        if (exists) {
+            console.log('Wallpaper already downloaded:', existingEntry.filePath);
+            return existingEntry.filePath;
+        } else {
+            console.log('Wallpaper file missing, will re-download');
+            return null;
+        }
+    }
+    
+    return null;
+};
+
 // Download image from URL
-const downloadImage = async (url) => {
+const downloadImage = async (url, cache) => {
     await ensureWallpaperDirectory();
 
-    const fileName = `wallpaper-${Date.now()}${path.extname(url.split('?')[0]) || '.jpg'}`;
+    // First check if wallpaper is already downloaded
+    const existingPath = await isWallpaperDownloaded(url, cache);
+    if (existingPath) {
+        return existingPath;
+    }
+
+    // If not found, download it
+    const fileName = getFilenameFromUrl(url);
     const filePath = path.join(WALLPAPERS_DIR, fileName);
 
     return new Promise((resolve, reject) => {
@@ -87,6 +165,17 @@ const downloadImage = async (url) => {
                 await delay(1000);
                 if (await verifyFile(filePath)) {
                     console.log('Image downloaded and verified successfully to:', filePath);
+                    
+                    // Add to cache
+                    cache.wallpapers.push({
+                        url: url,
+                        filePath: filePath,
+                        downloadedAt: new Date().toISOString()
+                    });
+                    
+                    // Update cache file
+                    await updateWallpaperCache(cache);
+                    
                     resolve(filePath);
                 } else {
                     reject(new Error('Downloaded file verification failed'));
@@ -203,12 +292,31 @@ const tryDirectRegistryUpdate = async (wallpaperPath) => {
     }
 };
 
-// Main function to set wallpaper - now without PowerShell method
+// Main function to set wallpaper
 const setWallpaper = async (url) => {
     try {
-        // Step 1: Download and verify the image
-        const wallpaperPath = await downloadImage(url);
-        console.log('Downloaded wallpaper to:', wallpaperPath);
+        // Initialize the wallpaper cache
+        const cache = await initializeWallpaperCache();
+        
+        // Step 1: Check if wallpaper is already downloaded, otherwise download and verify
+        let wallpaperPath;
+        
+        if (url === cache.current?.url) {
+            // This is the currently set wallpaper, reuse the path
+            console.log('Using current wallpaper:', cache.current.filePath);
+            wallpaperPath = cache.current.filePath;
+            
+            // Verify the file still exists
+            if (!(await verifyFile(wallpaperPath))) {
+                console.log('Current wallpaper file missing, downloading again');
+                wallpaperPath = await downloadImage(url, cache);
+            }
+        } else {
+            // Check if URL is in cache or download if needed
+            wallpaperPath = await downloadImage(url, cache);
+        }
+        
+        console.log('Using wallpaper path:', wallpaperPath);
 
         if (!(await verifyFile(wallpaperPath))) {
             throw new Error('Wallpaper file is invalid or missing');
@@ -229,6 +337,14 @@ const setWallpaper = async (url) => {
         // Step 4: Try direct registry update as final attempt
         await tryDirectRegistryUpdate(wallpaperPath);
 
+        // Update cache to mark this as the current wallpaper
+        cache.current = {
+            url: url,
+            filePath: wallpaperPath,
+            setAt: new Date().toISOString()
+        };
+        await updateWallpaperCache(cache);
+
         console.log('Wallpaper setting process completed');
 
         return {
@@ -241,7 +357,56 @@ const setWallpaper = async (url) => {
     }
 };
 
+// Clean up old wallpapers that haven't been used in a while
+const cleanupOldWallpapers = async (daysToKeep = 30) => {
+    try {
+        const cache = await initializeWallpaperCache();
+        const currentTime = new Date();
+        const currentUrl = cache.current?.url;
+        
+        // Filter out wallpapers older than daysToKeep
+        const wallpapersToKeep = [];
+        const wallpapersToDelete = [];
+        
+        for (const entry of cache.wallpapers) {
+            // Always keep the current wallpaper
+            if (entry.url === currentUrl) {
+                wallpapersToKeep.push(entry);
+                continue;
+            }
+            
+            const downloadDate = new Date(entry.downloadedAt);
+            const daysDifference = (currentTime - downloadDate) / (1000 * 60 * 60 * 24);
+            
+            if (daysDifference <= daysToKeep) {
+                wallpapersToKeep.push(entry);
+            } else {
+                wallpapersToDelete.push(entry);
+            }
+        }
+        
+        // Delete old wallpaper files
+        for (const entry of wallpapersToDelete) {
+            try {
+                await fsPromises.unlink(entry.filePath);
+                console.log(`Deleted old wallpaper: ${entry.filePath}`);
+            } catch (error) {
+                console.error(`Failed to delete wallpaper: ${entry.filePath}`, error);
+            }
+        }
+        
+        // Update cache with remaining wallpapers
+        cache.wallpapers = wallpapersToKeep;
+        await updateWallpaperCache(cache);
+        
+        console.log(`Cleanup complete: Kept ${wallpapersToKeep.length} wallpapers, deleted ${wallpapersToDelete.length} wallpapers`);
+    } catch (error) {
+        console.error('Error in cleanupOldWallpapers:', error);
+    }
+};
+
 module.exports = { 
     setWallpaper,
+    cleanupOldWallpapers,
     getSystemDataFolder: () => SYSTEM_DATA_FOLDER
 };
