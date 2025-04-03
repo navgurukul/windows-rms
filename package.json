@@ -1,7 +1,7 @@
 {
-  "name": "windows-rms-client",
+  "name": "sama-system-admin",
   "version": "1.0.2",
-  "description": "Windows RMS Client Application",
+  "description": "Sama System Administration Tool",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -24,8 +24,8 @@
     "electron-builder": "^24.9.1"
   },
   "build": {
-    "appId": "com.navgurukul.windowsrms",
-    "productName": "Windows RMS",
+    "appId": "com.thesama.systemadmin",
+    "productName": "Sama System Admin",
     "directories": {
       "output": "dist"
     },
@@ -62,6 +62,7 @@
       "icon": "build/icon.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}",
       "sign": null,
+      "executableName": "SamaSystemAdmin",
       "signAndEditExecutable": false
     },
     "nsis": {
