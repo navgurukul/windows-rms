@@ -1,4 +1,3 @@
-// services/autoUpdater.js
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 
@@ -10,9 +9,14 @@ autoUpdater.logger = log;
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
-let updateCheckInterval = null;
+// For completely silent updates
+autoUpdater.allowDowngrade = true;
+autoUpdater.allowPrerelease = false; // Set to true if you want to include pre-releases
 
-// autoUpdater.forceDevUpdateConfig = true;
+// Prevent any install prompts (completely silent)
+autoUpdater.disableWebInstaller = true;
+
+let updateCheckInterval = null;
 
 // Initialize update events
 function initializeUpdateEvents() {
@@ -46,7 +50,8 @@ function initializeUpdateEvents() {
   autoUpdater.on('update-downloaded', (info) => {
     console.log(`Update downloaded! Version ${info.version} will be installed on next restart.`);
     
-    // Uncomment the line below if you want to auto-restart the app after update download
+    // To automatically install without waiting for app quit
+    // Uncomment this if you want updates to install immediately when downloaded
     // autoUpdater.quitAndInstall(false, true);
   });
 }
@@ -90,4 +95,4 @@ module.exports = {
   checkForUpdates,
   startPeriodicUpdateChecks,
   stopPeriodicUpdateChecks
-};  
+};
