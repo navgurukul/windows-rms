@@ -183,11 +183,13 @@ function createWindow() {
     width: 400,
     height: 400,
     skipTaskbar: true,
+    icon: path.join(__dirname, 'icons', 'sama.ico'), // Add this line
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
       preload: path.join(__dirname, 'preload.js')
     }
+  
   });
 
   // Load the index.html file

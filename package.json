@@ -1,6 +1,6 @@
 {
   "name": "sama-system-admin",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "description": "Sama System Administration Tool",
   "main": "main.js",
   "scripts": {
@@ -59,7 +59,7 @@
           ]
         }
       ],
-      "icon": "build/icon.ico",
+      "icon": "icons/sama.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}",
       "sign": null,
       "executableName": "SamaSystemAdmin",
