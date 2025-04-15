@@ -233,7 +233,9 @@ function createWindow() {
 
 // When Electron has finished initialization
 app.whenReady().then(async () => {
+  console.log("===================================");
   main();
+  console.log("===================================");
 
   // Start the metrics collection
   const metricsInterval = await startMetricsCollection();

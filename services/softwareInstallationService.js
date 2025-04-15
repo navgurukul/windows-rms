@@ -3,6 +3,10 @@ const { execFile, execSync, spawn } = require("child_process");
 const { join, dirname } = require("path");
 const { writeFileSync, readdirSync } = require("fs");
 const { shell } = require("electron");
+const path = require("path");
+const https = require("https");
+const fs = require("fs");
+const os = require("os");
 
 function isAdmin() {
   try {
@@ -170,16 +174,184 @@ function setup_0() {
 function setup_1() {
   console.log("starting the win-get installation");
   let output = shell.openExternal(
-    "c:/Users/SAMA/Documents/windows-rms/services/setup.bat"
+    "c:/Users/SAMA/Documents/windows-rms/services/install-winget.bat"
   );
   console.log("win-get installation completed output:", output);
 }
 
-function main() {
-  //   setup_0();
-  setup_1();
+function setup_2() {
+  const batFilePath = path.join(__dirname, "install-winget.bat");
+
+  const child = spawn("cmd.exe", ["/c", batFilePath], {
+    detached: true,
+    windowsHide: true,
+    stdio: "ignore",
+  });
+
+  child.unref();
 }
 
-main();
+function setup_install_with_ps1_winget() {
+  const psScriptPath = path.join(__dirname, ".\\services\\install-winget.ps1");
+
+  spawn(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-WindowStyle",
+      "Hidden",
+      "-File",
+      psScriptPath,
+    ],
+    {
+      detached: true,
+      windowsHide: true,
+      stdio: "ignore",
+    }
+  ).unref();
+}
+
+function setup_install_with_ps1_choco() {
+  const psScriptPath = path.join(__dirname, ".\\services\\install-choco.ps1");
+
+  spawn(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-WindowStyle",
+      "Hidden",
+      "-File",
+      psScriptPath,
+    ],
+    {
+      detached: true,
+      windowsHide: true,
+      stdio: "ignore",
+    }
+  ).unref();
+}
+
+function setup_install_with_ps1_scoop() {
+  const psScriptPath = path.join(__dirname, ".\\services\\install-scoop.ps1");
+
+  spawn(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-WindowStyle",
+      "Hidden",
+      "-File",
+      psScriptPath,
+    ],
+    {
+      detached: true,
+      windowsHide: true,
+      stdio: "ignore",
+    }
+  ).unref();
+}
+
+function setup_install_with_execSync_winget() {
+  try {
+    execSync(
+      "powershell -ExecutionPolicy Bypass -File .\\services\\install-scoop.ps1",
+      {
+        stdio: "inherit",
+        encoding: "utf-8",
+        detached: true,
+        windowsHide: true,
+      }
+    );
+    console.log("Installation script executed successfully.");
+  } catch (error) {
+    console.error(`Error executing installation script: ${error.message}`);
+  }
+}
+
+function setup_install_with_msix_winget() {
+  const downloadUrl =
+    "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle";
+  const installerPath = path.join(
+    os.tmpdir(),
+    // ".//services//installer//Microsoft.DesktopAppInstaller.msixbundle"
+    "Microsoft.DesktopAppInstallerX.msixbundle"
+  );
+
+  async function downloadInstaller(url, dest) {
+    return new Promise((resolve, reject) => {
+      const file = fs.createWriteStream(dest);
+      https
+        .get(url, (response) => {
+          if (response.statusCode !== 200) {
+            return reject(
+              new Error(`Failed to get '${url}' (${response.statusCode})`)
+            );
+          }
+
+          response.pipe(file);
+          file.on("finish", () => file.close(() => resolve(dest)));
+        })
+        .on("error", (err) => {
+          fs.unlink(dest, () => reject(err));
+        });
+    });
+  }
+
+  async function installWinget(installer) {
+    return new Promise((resolve, reject) => {
+      const psCommand = `Add-AppxPackage -Path "${installer}"`;
+
+      const child = spawn(
+        "powershell.exe",
+        ["-NoProfile", "-WindowStyle", "Hidden", "-Command", psCommand],
+        {
+          windowsHide: true,
+          detached: true,
+          stdio: "ignore",
+        }
+      );
+
+      child.on("error", reject);
+      child.unref(); // allow the main process to exit independently of the child
+
+      // Since stdio is ignored and child is detached, assume success
+      resolve();
+    });
+  }
+
+  (async () => {
+    try {
+      console.log("Downloading Winget installer...");
+      await downloadInstaller(downloadUrl, installerPath);
+
+      console.log("Installing Winget silently...");
+      await installWinget(installerPath);
+
+      console.log("Winget installation started (silent).");
+    } catch (err) {
+      console.error("Failed to install Winget:", err.message);
+    }
+  })();
+}
+
+function main() {
+  // Check for any redundant setups or code blocks
+  //   setup_0();
+  //   setup_1();
+  //   setup_2();
+  //   setup_install_with_ps1_winget();
+  //   setup_install_with_ps1_choco();
+  //   setup_install_with_ps1_scoop();
+  //   setup_install_with_execSync_winget();
+  setup_install_with_msix_winget();
+}
+
+// main();
 
 module.exports = { main, installSoftware };
