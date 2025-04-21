@@ -235,6 +235,28 @@ function setup_install_with_ps1_choco() {
   ).unref();
 }
 
+async function wingetInstallPackage(appCode) {
+  return new Promise((resolve, reject) => {
+    const psCommand = `winget install ${appCode} --silent --accept-source-agreements --accept-package-agreements`;
+
+    const child = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-WindowStyle", "Hidden", "-Command", psCommand],
+      {
+        windowsHide: true,
+        detached: true,
+        stdio: "ignore",
+      }
+    );
+
+    child.on("error", reject);
+    child.unref(); // allow the main process to exit independently of the child
+
+    // Since stdio is ignored and child is detached, assume success
+    resolve();
+  });
+}
+
 function setup_install_with_ps1_scoop() {
   const psScriptPath = path.join(__dirname, ".\\services\\install-scoop.ps1");
 
@@ -275,8 +297,7 @@ function setup_install_with_execSync_winget() {
 }
 
 function setup_install_with_msix_winget() {
-  const downloadUrl =
-    "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle";
+  const downloadUrl = "https://github.com/microsoft/winget-cli/releases/download/v1.11.210-preview/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle";
   const installerPath = path.join(
     os.tmpdir(),
     // ".//services//installer//Microsoft.DesktopAppInstaller.msixbundle"
@@ -288,7 +309,7 @@ function setup_install_with_msix_winget() {
       const file = fs.createWriteStream(dest);
       https
         .get(url, (response) => {
-          if (response.statusCode !== 200) {
+          if (response.statusCode >= 400) {
             return reject(
               new Error(`Failed to get '${url}' (${response.statusCode})`)
             );
@@ -350,6 +371,15 @@ function main() {
   //   setup_install_with_ps1_scoop();
   //   setup_install_with_execSync_winget();
   setup_install_with_msix_winget();
+
+  // test installing Brave
+  wingetInstallPackage("BraveSoftware.BraveBrowser")
+    .then(() => {
+      console.log("Brave installed successfully.");
+    })
+    .catch((error) => {
+      console.error("Error installing Brave:", error);
+    });
 }
 
 // main();
