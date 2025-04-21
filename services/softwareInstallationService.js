@@ -296,7 +296,7 @@ function setup_install_with_execSync_winget() {
   }
 }
 
-function setup_install_with_msix_winget() {
+async function setup_install_with_msix_winget() {
   const downloadUrl = "https://github.com/microsoft/winget-cli/releases/download/v1.11.210-preview/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle";
   const installerPath = path.join(
     os.tmpdir(),
@@ -346,7 +346,7 @@ function setup_install_with_msix_winget() {
     });
   }
 
-  (async () => {
+  await (async () => {
     try {
       console.log("Downloading Winget installer...");
       await downloadInstaller(downloadUrl, installerPath);
@@ -361,7 +361,7 @@ function setup_install_with_msix_winget() {
   })();
 }
 
-function main() {
+async function main() {
   // Check for any redundant setups or code blocks
   //   setup_0();
   //   setup_1();
@@ -370,10 +370,10 @@ function main() {
   //   setup_install_with_ps1_choco();
   //   setup_install_with_ps1_scoop();
   //   setup_install_with_execSync_winget();
-  setup_install_with_msix_winget();
+  await setup_install_with_msix_winget();
 
   // test installing Brave
-  wingetInstallPackage("BraveSoftware.BraveBrowser")
+  await wingetInstallPackage("BraveSoftware.BraveBrowser")
     .then(() => {
       console.log("Brave installed successfully.");
     })
