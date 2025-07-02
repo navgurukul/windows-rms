@@ -15,10 +15,18 @@ function isAdmin() {
 function runAsAdmin(command) {
     const tempDir = os.tmpdir();
     const batchFile = path.join(tempDir, "install_command.bat");
-    
+
     fs.writeFileSync(batchFile, `@echo off\n${command}\npause`);
-    
+
     return `powershell -Command "Start-Process -FilePath '${batchFile}' -Verb RunAs"`;
+}
+
+function getFutureTime(minutesAhead = 1) {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + minutesAhead);
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    return `${hours}:${minutes}`;
 }
 
 function getInstallPath(softwareName) {
@@ -26,18 +34,18 @@ function getInstallPath(softwareName) {
         const registryPath = `HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*`;
         const installPathCmd = `powershell -Command "(Get-ItemProperty '${registryPath}' | Where-Object { $_.DisplayName -like '*${softwareName}*' }).InstallLocation"`;
         const installPath = execSync(installPathCmd, { encoding: "utf-8" }).trim();
-        
+
         if (installPath) {
             return installPath;
         } else {
             const registryPath32 = `HKLM:\\SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*`;
             const installPathCmd32 = `powershell -Command "(Get-ItemProperty '${registryPath32}' | Where-Object { $_.DisplayName -like '*${softwareName}*' }).InstallLocation"`;
             const installPath32 = execSync(installPathCmd32, { encoding: "utf-8" }).trim();
-            
+
             if (installPath32) {
                 return installPath32;
             }
-            
+
             console.log(`Unable to find installation path for ${softwareName}.`);
             return null;
         }
@@ -58,7 +66,7 @@ function createShortcut(softwareName, installPath) {
         const files = fs.readdirSync(installPath);
         const exeFiles = files.filter(file => file.endsWith('.exe'));
         if (exeFiles.length > 0) {
-            const matchingSoftwareExe = exeFiles.find(file => 
+            const matchingSoftwareExe = exeFiles.find(file =>
                 file.toLowerCase().includes(softwareName.toLowerCase())
             );
             const exeFile = matchingSoftwareExe || exeFiles[0];
@@ -95,11 +103,11 @@ function installSoftware(softwareName) {
         }
 
         const platform = os.platform();
-        
+
         if (platform !== "win32") {
             throw new Error("Unsupported operating system. This script only works on Windows.");
         }
-        
+
         const command = `choco install ${softwareName} -y`;
         console.log(`Preparing to install: ${softwareName}`);
 
@@ -110,7 +118,7 @@ function installSoftware(softwareName) {
                 execSync(adminCommand);
                 console.log("Installation process launched with admin privileges.");
                 console.log("Please check the opened admin window to monitor installation progress.");
-                
+
                 console.log("Once installation is complete, run this script again with admin privileges to create shortcuts.");
                 return;
             } catch (error) {
@@ -121,11 +129,11 @@ function installSoftware(softwareName) {
 
         console.log(`Executing: ${command}`);
         const child = spawn(command, { shell: true, stdio: "inherit" });
-        
+
         child.on("close", (code) => {
             if (code === 0) {
                 console.log(`${softwareName} installed successfully!`);
-                
+
                 const installPath = getInstallPath(softwareName);
                 if (installPath) {
                     console.log(`Installed at: ${installPath}`);
@@ -141,7 +149,71 @@ function installSoftware(softwareName) {
     }
 }
 
-// const softwareName ="obs-studio"
-// installSoftware(softwareName);
+function installViaScheduledTask(softwareName) {
+    const tempDir = os.tmpdir();
+    const scriptPath = path.join(tempDir, `${softwareName}-install.ps1`);
+    const logPath = path.join(tempDir, `${softwareName}-install.log`);
+    const taskName = `SilentInstall_${softwareName}_${Date.now()}`;
+    const startTime = getFutureTime(1);
 
-module.exports = { installSoftware };
+    // Create PowerShell script (with logging)
+    const psContent = `
+Start-Transcript -Path "${logPath}" -Append
+choco install ${softwareName} -y --no-progress
+Stop-Transcript
+`;
+    fs.writeFileSync(scriptPath, psContent);
+
+    console.log(`PowerShell script: ${scriptPath}`);
+    console.log(`Log file will be: ${logPath}`);
+    console.log(`Task name: ${taskName} scheduled for: ${startTime}`);
+
+    // Escape path for use inside schtasks string
+    const escapedScriptPath = scriptPath.replace(/\\/g, '\\\\');
+
+    try {
+        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /F`;
+        execSync(taskCmd);
+        execSync(`schtasks /Run /TN "${taskName}"`);
+        console.log(`✅ ${softwareName} installation scheduled silently (no visible terminal).`);
+
+        // Cleanup after delay
+        setTimeout(() => {
+            console.log(`\n🧹 Running cleanup for ${softwareName}...`);
+
+            try {
+                const logText = fs.readFileSync(logPath, "utf8");
+                console.log(`Log Preview:\n${logText.slice(-1000)}`);
+            } catch {
+                console.log("⚠️ No log available.");
+            }
+
+            try {
+                execSync(`schtasks /Delete /TN "${taskName}" /F`);
+                console.log(`🗑 Deleted task: ${taskName}`);
+            } catch (err) {
+                console.log(`⚠️ Could not delete task: ${err.message}`);
+            }
+
+            try {
+                fs.unlinkSync(scriptPath);
+                console.log(`🗑 Deleted script: ${scriptPath}`);
+            } catch { }
+
+            try {
+                fs.unlinkSync(logPath);
+                console.log(`🗑 Deleted log: ${logPath}`);
+            } catch { }
+
+        }, 150000); // cleanup after 2.5 minutes
+
+    } catch (error) {
+        console.error(`❌ Scheduled task failed: ${error.message}`);
+    }
+}
+
+const softwareName = "obs-studio.portable";
+installViaScheduledTask(softwareName);
+
+// installSoftware(softwareName);
+module.exports = { installSoftware, installViaScheduledTask };
