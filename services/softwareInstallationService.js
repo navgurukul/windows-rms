@@ -213,7 +213,7 @@ Stop-Transcript
 }
 
 const softwareName = "obs-studio.portable";
-installViaScheduledTask(softwareName);
+installViaScheduledTask(softwareName);  //silently install via scheduled task
 
 // installSoftware(softwareName);
 module.exports = { installSoftware, installViaScheduledTask };
