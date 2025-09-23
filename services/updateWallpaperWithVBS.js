@@ -250,7 +250,7 @@ const executeVBScriptOnce = async (vbsPath) => {
             if (error) {
                 console.error('VBScript execution error:', error);
                 reject(error);
-                return;
+                return false;
             }
             resolve();
         });
@@ -264,13 +264,15 @@ const executeVBScript = async (vbsPath) => {
     for (let i = 0; i < RETRY_COUNT; i++) {
         try {
             console.log(`Attempt ${i + 1} of ${RETRY_COUNT}...`);
-            await executeVBScriptOnce(vbsPath);
+            const result = await executeVBScriptOnce(vbsPath);
+            if (!result) {
+                break;
+            }
             await delay(RETRY_DELAY * 2); // Slightly longer delay between attempts
         } catch (error) {
             console.error(`Error in attempt ${i + 1}:`, error);
         }
     }
-
     console.log('All wallpaper set attempts completed');
 };
 

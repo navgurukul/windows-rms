@@ -6,9 +6,13 @@ module.exports = {
     SYNC_INTERVAL: 30000, // 20 minutes
     
     // API endpoints
-    BACKEND_BULK_URL: 'https://windows-socket.thesama.in/api/tracking/bulk-sync',
-    BACKEND_SINGLE_URL: 'https://windows-socket.thesama.in/api/tracking/sync',
+    BACKEND_BASE_URL: 'http://localhost:3000',
+    BACKEND_BULK_URL: 'http://localhost:3000/api/tracking/bulk-sync',
+    BACKEND_SINGLE_URL: 'http://localhost:3000/api/tracking/sync',
     
+    // BACKEND_BULK_URL: 'https://windows-socket.thesama.in/api/tracking/bulk-sync',
+    // BACKEND_SINGLE_URL: 'https://windows-socket.thesama.in/api/tracking/sync',
+    SYSTEM_DATA_FOLDER: 'C:\\System.ServiceData',
     // JSON storage location
     JSON_FOLDER_NAME: 'SystemDataStorage',
     JSON_FILE_NAME: 'sysdata_repository.json'

@@ -2,6 +2,10 @@ const { execSync, spawn } = require("child_process");
 const os = require("os");
 const path = require("path");
 const fs = require("fs");
+const axios = require('axios');
+const schedule = require('node-cron');
+const { BACKEND_BASE_URL } = require('../config/config');
+const { getSerialNumber } = require('./metricService');
 
 function isAdmin() {
     try {
@@ -149,7 +153,7 @@ function installSoftware(softwareName) {
     }
 }
 
-function installViaScheduledTask(softwareName) {
+async function installViaScheduledTask(softwareName) {
     const tempDir = os.tmpdir();
     const scriptPath = path.join(tempDir, `${softwareName}-install.ps1`);
     const logPath = path.join(tempDir, `${softwareName}-install.log`);
@@ -206,14 +210,73 @@ Stop-Transcript
             } catch { }
 
         }, 150000); // cleanup after 2.5 minutes
-
+        const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+            serial_number: await getSerialNumber(),
+            software_name: softwareName,
+            isSuccessful: true
+        }).then(response => {
+            console.log("History created: ", response.data);
+        }).catch(error => {
+            console.error("Error creating history: ", error.message);
+            return;
+        });
     } catch (error) {
+        const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+            serial_number: await getSerialNumber(),
+            software_name: softwareName,
+            isSuccessful: false
+        }).then(response => {
+            console.log("History created: ", response.data);
+        }).catch(error => {
+            console.error("Error creating history: ", error.message);
+            return;
+        });
         console.error(`❌ Scheduled task failed: ${error.message}`);
+        return;
     }
 }
 
-const softwareName = "obs-studio.portable";
-installViaScheduledTask(softwareName);  //silently install via scheduled task
+// const softwareName = "obs-studio.portable";
+// Schedule the job to run at 11:00 AM IST every day
+// 11:00 AM IST = 05:30 AM UTC
+schedule.schedule('0 5 * * *', async () => {
+    console.log('Running scheduled task to install not installed softwares');
+    try {
+        const fetchNotInstalledSoftwares = await axios.get(`${BACKEND_BASE_URL}/api/softwares/notInstalled?serial_number=${await getSerialNumber()}`);
+        console.log(fetchNotInstalledSoftwares.data);
+        const softwareNameArray = fetchNotInstalledSoftwares.data.softwareName;
+        console.log(softwareNameArray);
+        for (const softwareName of softwareNameArray) {
+            if (typeof softwareName !== 'string') {
+                console.log("softwareName is not a string: ", softwareName);
+                continue;
+            }
+            await installViaScheduledTask(softwareName);  //silently install via scheduled task
+        }
+    } catch (error) {
+        console.error('Error fetching or installing software:', error.message);
+    }
+}, {
+    scheduled: false,
+    timezone: "Asia/Kolkata"
+});
+
+const demoFunction = async () => {
+    try {
+        setTimeout(async () => {
+            const fetchNotInstalledSoftwares = await axios.get(`${BACKEND_BASE_URL}/api/softwares/notInstalled?serial_number=${await getSerialNumber()}`);
+            console.log("fetchNotInstalledSoftwares: ", fetchNotInstalledSoftwares.data);
+            const softwareNameArray = fetchNotInstalledSoftwares.data;
+            console.log("softwareNameArray: ", softwareNameArray);
+            for (const softwareName of softwareNameArray) {
+                await installViaScheduledTask(softwareName);  //silently install via scheduled task
+            }
+        }, 2000);
+    } catch (error) {
+        console.error('Error fetching or installing software in demoFunction:', error.message);
+    }
+}
+demoFunction();
 
 // installSoftware(softwareName);
 module.exports = { installSoftware, installViaScheduledTask };
