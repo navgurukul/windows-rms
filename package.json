@@ -64,7 +64,8 @@
       "artifactName": "${productName}-Setup-${version}.${ext}",
       "sign": null,
       "executableName": "SamaSystemAdmin",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "requestedExecutionLevel": "requireAdministrator"
     },
     "nsis": {
       "oneClick": true,
