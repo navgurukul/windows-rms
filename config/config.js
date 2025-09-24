@@ -10,7 +10,7 @@ module.exports = {
   // BACKEND_BULK_URL: 'http://192.168.1.14:3000/api/tracking/bulk-sync',
   // BACKEND_SINGLE_URL: 'http://192.168.1.14:3000/api/tracking/sync',
 
-  // sANDBOX API endpoints --RAILWAY
+  // SANDBOX API endpoints --RAILWAY
   BACKEND_BASE_URL: 'https://windows-rms-server-production.up.railway.app',
   BACKEND_BULK_URL: 'https://windows-rms-server-production.up.railway.app/api/tracking/bulk-sync',
   BACKEND_SINGLE_URL: 'https://windows-rms-server-production.up.railway.app/api/tracking/sync',
