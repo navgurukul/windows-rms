@@ -6,6 +6,7 @@ const axios = require('axios');
 const schedule = require('node-cron');
 const { BACKEND_BASE_URL } = require('../config/config');
 const { getSerialNumber } = require('./metricService');
+const { ensureChocolateyInstalled } = require('./chocolateyService');
 
 function isAdmin() {
     try {
@@ -204,36 +205,37 @@ async function installViaScheduledTask(softwareName) {
                 console.log(`🗑 Deleted script: ${scriptPath}`);
             } catch { }
 
-            try {
-                fs.unlinkSync(logPath);
-                console.log(`🗑 Deleted log: ${logPath}`);
-            } catch { }
+            // try {
+            //     fs.unlinkSync(logPath);
+            //     console.log(`🗑 Deleted log: ${logPath}`);
+            // } catch { }
 
-        }, 150000); // cleanup after 2.5 minutes
-        const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
-            serial_number: await getSerialNumber(),
-            software_name: softwareName,
-            isSuccessful: true
-        }).then(response => {
-            console.log("History created: ", response.data);
-        }).catch(error => {
-            console.error("Error creating history: ", error.message);
-            return;
-        });
-    } catch (error) {
-        const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
-            serial_number: await getSerialNumber(),
-            software_name: softwareName,
-            isSuccessful: false
-        }).then(response => {
-            console.log("History created: ", response.data);
-        }).catch(error => {
-            console.error("Error creating history: ", error.message);
-            return;
-        });
-        console.error(`❌ Scheduled task failed: ${error.message}`);
-        return;
-    }
+	}, 150000); // cleanup after 2.5 minutes
+
+	const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+		serial_number: await getSerialNumber(),
+		software_name: softwareName,
+		isSuccessful: true
+	}).then(response => {
+		console.log("History created: ", response.data);
+	}).catch(error => {
+		console.error("Error creating history: ", error.message);
+		return;
+	});
+} catch (error) {
+	const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+		serial_number: await getSerialNumber(),
+		software_name: softwareName,
+		isSuccessful: false
+	}).then(response => {
+		console.log("History created: ", response.data);
+	}).catch(error => {
+		console.error("Error creating history: ", error.message);
+		return;
+	});
+	console.error(`❌ Scheduled task failed: ${error.message}`);
+	return;
+}
 }
 
 // const softwareName = "obs-studio.portable";

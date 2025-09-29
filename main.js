@@ -4,8 +4,9 @@ const config = require('./config/config');
 const metricService = require('./services/metricService');
 const { setWallpaper } = require('./services/updateWallpaperWithVBS');
 const { installSoftware } = require('./services/softwareInstallationService');
+const { ensureChocolateyInstalled } = require('./services/chocolateyService');
 const axios = require('axios');
-const autoUpdater = require('./services/autoUpdaterService');
+// const autoUpdater = require('./services/autoUpdaterService');
 
 // Globals
 let mainWindow;
@@ -63,6 +64,7 @@ console.warn = (...args) => {
 };
 
 // -------------------- STARTUP TASKS --------------------
+
 (async () => {
   try {
     const response = await axios.post(`${config.BACKEND_BASE_URL}/api/devices`, {
@@ -73,6 +75,11 @@ console.warn = (...args) => {
     });
     console.log("Synced data to server");
     console.log(response.data);
+
+    // Check if Chocolatey is installed
+    const chocolateyInstalled = await ensureChocolateyInstalled();
+    console.log(chocolateyInstalled);
+
   } catch (error) {
     console.error("Error syncing data to server:", error);
   }
@@ -148,7 +155,7 @@ app.whenReady().then(async () => {
   await startMetricsCollection();
   mainWindow = createWindow();
 
-  autoUpdater.startPeriodicUpdateChecks(6 * 60 * 60 * 1000); // 6 hours
+  // autoUpdater.startPeriodicUpdateChecks(6 * 60 * 60 * 1000); // 6 hours
   await fetchAndSetWallpaper();
 
   app.on('activate', () => {
@@ -165,7 +172,7 @@ async function handleShutdown() {
     if (metricsInterval) clearInterval(metricsInterval);
     if (syncInterval) clearInterval(syncInterval);
 
-    autoUpdater.stopPeriodicUpdateChecks();
+    // autoUpdater.stopPeriodicUpdateChecks();
 
     const forceQuitTimeout = setTimeout(() => {
       console.log('Forcing app quit due to timeout...');

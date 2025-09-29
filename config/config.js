@@ -5,7 +5,7 @@ module.exports = {
   // Time between server sync attempts (in milliseconds)
   SYNC_INTERVAL: 30000, // 20 minutes
 
-  // // API endpoints
+  // API endpoints
   // BACKEND_BASE_URL: 'http://192.168.1.14:3000',
   // BACKEND_BULK_URL: 'http://192.168.1.14:3000/api/tracking/bulk-sync',
   // BACKEND_SINGLE_URL: 'http://192.168.1.14:3000/api/tracking/sync',

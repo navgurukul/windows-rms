@@ -5,7 +5,7 @@ const axios = require('axios');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
-const { BACKEND_BULK_URL: BACKEND_BULK_URL_CONFIG, BACKEND_SINGLE_URL: BACKEND_SINGLE_URL_CONFIG } = require('../config/config');
+const { BACKEND_BULK_URL: BACKEND_BULK_URL_CONFIG, BACKEND_SINGLE_URL: BACKEND_SINGLE_URL_CONFIG, BACKEND_BASE_URL } = require('../config/config');
 
 // New file paths - in C drive hidden folder with cryptic name
 const APP_DATA_FOLDER = path.join('C:', 'System.ServiceData');
@@ -354,7 +354,14 @@ async function syncSingleData() {
       last_updated: new Date().toISOString()
     };
 
-    // Send to single API
+    // Delay for 2 seconds before sending to single API so that device is registered
+    const deviceExists = await axios.get(`${BACKEND_BASE_URL}/api/devices/serial/${dailyData.serial_number}`);
+    if (deviceExists.status === 200) {
+      console.log('Device is registered, sending data');
+    } else {
+      console.log('Device is not registered, skipping data');
+      return false;
+    }
     const response = await axios.post(BACKEND_SINGLE_URL, syncPayload);
 
     // Return true only if we get a 200 status
@@ -379,7 +386,14 @@ async function syncBulkData(historyData) {
       records: historyData.records
     };
 
-    // Send to bulk API
+    // Delay for 2 seconds before sending to bulk API so that device is registered
+    const deviceExists = await axios.get(`${BACKEND_BASE_URL}/api/devices/serial/${dailyData.serial_number}`);
+    if (deviceExists.status === 200) {
+      console.log('Device is registered, sending data');
+    } else {
+      console.log('Device is not registered, skipping data');
+      return false;
+    }
     const response = await axios.post(BACKEND_BULK_URL, payload);
 
     if (response.status === 200) {
