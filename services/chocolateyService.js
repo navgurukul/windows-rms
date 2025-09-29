@@ -50,14 +50,14 @@ async function installChocolatey() {
             # Install Chocolatey using official installation script
             Write-Host "[$(Get-Date)] Downloading and executing Chocolatey installation script..." -ForegroundColor Yellow
             $installScript = @"
-\$ErrorActionPreference = "Stop"
-\$ProgressPreference = 'SilentlyContinue'
-Set-PSDebug -Trace 2
- 
-Write-Host "Setting up Chocolatey..." 3>$null
-Invoke-Expression (Invoke-WebRequest https://chocolatey.org/install.ps1 -UseBasicParsing).Content
-Write-Host "Chocolatey setup completed." 3>$null
-"@
+                \$ErrorActionPreference = "Stop"
+                \$ProgressPreference = 'SilentlyContinue'
+                Set-PSDebug -Trace 2
+                
+                Write-Host "Setting up Chocolatey..." 3>$null
+                Invoke-Expression (Invoke-WebRequest https://chocolatey.org/install.ps1 -UseBasicParsing).Content
+                Write-Host "Chocolatey setup completed." 3>$null
+                "@
             
             Invoke-Expression $installScript
             
