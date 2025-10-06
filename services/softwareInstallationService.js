@@ -26,7 +26,7 @@ function runAsAdmin(command) {
     return `powershell -Command "Start-Process -FilePath '${batchFile}' -Verb RunAs"`;
 }
 
-function getFutureTime(minutesAhead = 1) {
+function getFutureTime(minutesAhead = 3) {
     const now = new Date();
     now.setMinutes(now.getMinutes() + minutesAhead);
     const hours = now.getHours().toString().padStart(2, '0');
@@ -164,7 +164,7 @@ async function installViaScheduledTask(softwareName) {
     // Create PowerShell script (with logging)
     const psContent = `
         Start-Transcript -Path "${logPath}" -Append
-        choco install ${softwareName} -y --no-progress
+        choco install ${softwareName} -y --no-progress --force
         Stop-Transcript
     `;
     fs.writeFileSync(scriptPath, psContent);
@@ -177,7 +177,9 @@ async function installViaScheduledTask(softwareName) {
     const escapedScriptPath = scriptPath.replace(/\\/g, '\\\\');
 
     try {
-        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /F`;
+        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU SYSTEM /F`;
+        // schtasks /Create /TN "SilentInstall_brave" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\\Temp\\brave-install.ps1\"" /SC ONCE /ST 23:59 /RL HIGHEST /RU "%USERNAME%" /F
+
         execSync(taskCmd);
         execSync(`schtasks /Run /TN "${taskName}"`);
         console.log(`✅ ${softwareName} installation scheduled silently (no visible terminal).`);
@@ -205,12 +207,12 @@ async function installViaScheduledTask(softwareName) {
                 console.log(`🗑 Deleted script: ${scriptPath}`);
             } catch { }
 
-            // try {
-            //     fs.unlinkSync(logPath);
-            //     console.log(`🗑 Deleted log: ${logPath}`);
-            // } catch { }
+            try {
+                fs.unlinkSync(logPath);
+                console.log(`🗑 Deleted log: ${logPath}`);
+            } catch { }
 
-	}, 150000); // cleanup after 2.5 minutes
+	}, 3600000); // cleanup after 60 minutes
 
 	const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
 		serial_number: await getSerialNumber(),

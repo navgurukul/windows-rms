@@ -362,6 +362,7 @@ async function syncSingleData() {
       console.log('Device is not registered, skipping data');
       return false;
     }
+    await new Promise(resolve => setTimeout(resolve, 2000));
     const response = await axios.post(BACKEND_SINGLE_URL, syncPayload);
 
     // Return true only if we get a 200 status
@@ -387,7 +388,7 @@ async function syncBulkData(historyData) {
     };
 
     // Delay for 2 seconds before sending to bulk API so that device is registered
-    const deviceExists = await axios.get(`${BACKEND_BASE_URL}/api/devices/serial/${dailyData.serial_number}`);
+    const deviceExists = await axios.get(`${BACKEND_BASE_URL}/api/devices/serial/${await getSerialNumber()}`);
     if (deviceExists.status === 200) {
       console.log('Device is registered, sending data');
     } else {
