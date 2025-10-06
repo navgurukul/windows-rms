@@ -159,14 +159,21 @@ async function installViaScheduledTask(softwareName) {
     const scriptPath = path.join(tempDir, `${softwareName}-install.ps1`);
     const logPath = path.join(tempDir, `${softwareName}-install.log`);
     const taskName = `SilentInstall_${softwareName}_${Date.now()}`;
-    const startTime = getFutureTime(1);
+    const startTime = getFutureTime(2);
 
     // Create PowerShell script (with logging)
+
     const psContent = `
         Start-Transcript -Path "${logPath}" -Append
-        choco install ${softwareName} -y --no-progress --force
+        choco install ${softwareName} -y --no-progress --force --install-arguments "/S /D=C:\\System.ServiceData\\Softwares\\${softwareName}"
         Stop-Transcript
     `;
+
+    // const psContent = `
+    //     Start-Transcript -Path "${logPath}" -Append
+    //     choco install ${softwareName} -y --no-progress --force 
+    //     Stop-Transcript
+    // `;
     fs.writeFileSync(scriptPath, psContent);
 
     console.log(`PowerShell script: ${scriptPath}`);
@@ -177,11 +184,14 @@ async function installViaScheduledTask(softwareName) {
     const escapedScriptPath = scriptPath.replace(/\\/g, '\\\\');
 
     try {
-        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU SYSTEM /F`;
+        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU "%USERNAME%" /F`;
+        
+        // const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU SYSTEM /F`;
+
         // schtasks /Create /TN "SilentInstall_brave" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\\Temp\\brave-install.ps1\"" /SC ONCE /ST 23:59 /RL HIGHEST /RU "%USERNAME%" /F
 
         execSync(taskCmd);
-        execSync(`schtasks /Run /TN "${taskName}"`);
+        // execSync(`schtasks /Run /TN "${taskName}"`);
         console.log(`✅ ${softwareName} installation scheduled silently (no visible terminal).`);
 
         // Cleanup after delay
@@ -212,32 +222,32 @@ async function installViaScheduledTask(softwareName) {
                 console.log(`🗑 Deleted log: ${logPath}`);
             } catch { }
 
-	}, 3600000); // cleanup after 60 minutes
+        }, 3600000); // cleanup after 60 minutes
 
-	const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
-		serial_number: await getSerialNumber(),
-		software_name: softwareName,
-		isSuccessful: true
-	}).then(response => {
-		console.log("History created: ", response.data);
-	}).catch(error => {
-		console.error("Error creating history: ", error.message);
-		return;
-	});
-} catch (error) {
-	const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
-		serial_number: await getSerialNumber(),
-		software_name: softwareName,
-		isSuccessful: false
-	}).then(response => {
-		console.log("History created: ", response.data);
-	}).catch(error => {
-		console.error("Error creating history: ", error.message);
-		return;
-	});
-	console.error(`❌ Scheduled task failed: ${error.message}`);
-	return;
-}
+        const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+            serial_number: await getSerialNumber(),
+            software_name: softwareName,
+            isSuccessful: true
+        }).then(response => {
+            console.log("History created: ", response.data);
+        }).catch(error => {
+            console.error("Error creating history: ", error.message);
+            return;
+        });
+    } catch (error) {
+        const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+            serial_number: await getSerialNumber(),
+            software_name: softwareName,
+            isSuccessful: false
+        }).then(response => {
+            console.log("History created: ", response.data);
+        }).catch(error => {
+            console.error("Error creating history: ", error.message);
+            return;
+        });
+        console.error(`❌ Scheduled task failed: ${error.message}`);
+        return;
+    }
 }
 
 // const softwareName = "obs-studio.portable";
