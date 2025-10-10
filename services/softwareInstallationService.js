@@ -163,17 +163,17 @@ async function installViaScheduledTask(softwareName) {
 
     // Create PowerShell script (with logging)
 
-    const psContent = `
-        Start-Transcript -Path "${logPath}" -Append
-        choco install ${softwareName} -y --no-progress --force --install-arguments "/S /D=C:\\System.ServiceData\\Softwares\\${softwareName}"
-        Stop-Transcript
-    `;
-
     // const psContent = `
     //     Start-Transcript -Path "${logPath}" -Append
-    //     choco install ${softwareName} -y --no-progress --force 
+    //     choco install ${softwareName} -y --no-progress --force --install-arguments "/S /D=C:\\System.ServiceData\\Softwares\\${softwareName}"
     //     Stop-Transcript
     // `;
+
+    const psContent = `
+        Start-Transcript -Path "${logPath}" -Append
+        choco install ${softwareName} -y --no-progress --force 
+        Stop-Transcript
+    `;
     fs.writeFileSync(scriptPath, psContent);
 
     console.log(`PowerShell script: ${scriptPath}`);
