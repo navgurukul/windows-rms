@@ -184,8 +184,8 @@ async function installViaScheduledTask(softwareName) {
     const escapedScriptPath = scriptPath.replace(/\\/g, '\\\\');
 
     try {
-        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU "%USERNAME%" /F`;
-        
+        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU SYSTEM /F`;
+
         // const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU SYSTEM /F`;
 
         // schtasks /Create /TN "SilentInstall_brave" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\\Temp\\brave-install.ps1\"" /SC ONCE /ST 23:59 /RL HIGHEST /RU "%USERNAME%" /F
@@ -201,6 +201,10 @@ async function installViaScheduledTask(softwareName) {
             try {
                 const logText = fs.readFileSync(logPath, "utf8");
                 console.log(`Log Preview:\n${logText.slice(-1000)}`);
+                const deployPath = extractDeploymentPath(logText);
+                console.log(`📦 Software deployed to: ${deployPath}`);
+                // Optionally: create shortcut here automatically
+                createShortcut(softwareName, deployPath);
             } catch {
                 console.log("⚠️ No log available.");
             }
@@ -222,7 +226,7 @@ async function installViaScheduledTask(softwareName) {
                 console.log(`🗑 Deleted log: ${logPath}`);
             } catch { }
 
-        }, 3600000); // cleanup after 60 minutes
+        }, 300000); // cleanup after 5 minutes
 
         const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
             serial_number: await getSerialNumber(),
@@ -291,6 +295,17 @@ const demoFunction = async () => {
     }
 }
 demoFunction();
+
+function extractDeploymentPath(logContent) {
+    // Regex to match the "Deployed to 'C:\ProgramData\chocolatey\lib\discord'" line
+    const regex = /Deployed to '([^']+)'/i;
+
+    const match = logContent.match(regex);
+    if (match && match[1]) {
+        return match[1]; // The actual path inside the quotes
+    }
+    return null;
+}
 
 // installSoftware(softwareName);
 module.exports = { installSoftware, installViaScheduledTask };
