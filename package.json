@@ -1,10 +1,10 @@
 {
   "name": "sama-system-admin",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Sama System Administration Tool",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "electron --trace-warnings .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --windows",
     "build-win": "electron-builder --windows --x64",
@@ -16,6 +16,7 @@
     "axios": "^1.8.2",
     "electron-log": "^5.3.2",
     "electron-updater": "^6.3.9",
+    "node-cron": "^4.2.1",
     "node-windows": "0.1.14",
     "uuid": "^9.0.0"
   },
@@ -63,14 +64,15 @@
       "artifactName": "${productName}-Setup-${version}.${ext}",
       "sign": null,
       "executableName": "SamaSystemAdmin",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "requestedExecutionLevel": "requireAdministrator"
     },
     "nsis": {
       "oneClick": true,
       "perMachine": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "runAfterFinish": true,
+      "runAfterFinish": false,
       "allowToChangeInstallationDirectory": false
     }
   },
