@@ -36,6 +36,64 @@ async function installChocolatey() {
     console.log("🔧 Installing Chocolatey as Administrator in background...");
 
     // Create PowerShell script for Chocolatey installation with comprehensive logging
+
+    // const OLD_SCRIPT = "
+    // try {
+    //         Write-Host "[$(Get-Date)] Starting Chocolatey installation process..." -ForegroundColor Green
+            
+    //         # Set execution policy
+    //         Write-Host "[$(Get-Date)] Setting execution policy..." -ForegroundColor Yellow
+    //         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
+            
+    //         # Install Chocolatey using official installation script
+    //         Write-Host "[$(Get-Date)] Downloading and executing Chocolatey installation script..." -ForegroundColor Yellow
+    //         $installScript = @"
+    //             \$ErrorActionPreference = "Stop"
+    //             \$ProgressPreference = 'SilentlyContinue'
+    //             Set-PSDebug -Trace 2
+                
+    //             Write-Host "Setting up Chocolatey..." 3>$null
+    //             Invoke-Expression (Invoke-WebRequest https://chocolatey.org/install.ps1 -UseBasicParsing).Content
+    //             Write-Host "Chocolatey setup completed." 3>$null
+    //             "@
+            
+    //         Invoke-Expression $installScript
+            
+    //         # Refresh environment variables
+    //         Write-Host "[$(Get-Date)] Refreshing environment variables..." -ForegroundColor Yellow
+    //         \$env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+            
+    //         # Verify installation
+    //         Write-Host "[$(Get-Date)] Verifying Chocolatey installation..." -ForegroundColor Yellow
+    //         choco --version
+            
+    //         Write-Host "[$(Get-Date)] Chocolatey installation completed successfully!" -ForegroundColor Green
+            
+    //     } catch {
+    //         Write-Host "[$(Get-Date)] ERROR: Chocolatey installation failed: \$(\$_.Exception.Message)" -ForegroundColor Red
+    //         Write-Host "[$(Get-Date)] Full error details: \$(\$_.Exception)" -ForegroundColor Red
+            
+    //         # Try alternative installation method
+    //         try {
+    //             Write-Host "[$(Get-Date)] Attempting alternative installation method..." -ForegroundColor Yellow
+                
+    //             # Get PowerShell version and download appropriate installer
+    //             if (\$PSVersionTable.PSVersion.Major -ge 5) {
+    //                 Invoke-RestMethod -Uri "https://community.chocolatey.org/api/v2/packages/chocolatey" -UseBasicParsing | Invoke-RestMethod -ContentType "application/json" | Invoke-Expression
+    //             } else {
+    //                 Write-Host "[$(Get-Date)] PowerShell version too old for Chocolatey installation" -ForegroundColor Red
+    //             }
+                
+    //             Write-Host "[$(Get-Date)] Alternative installation method completed." -ForegroundColor Green
+                
+    //         } catch {
+    //             Write-Host "[$(Get-Date)] Alternative installation method also failed: \$(\$_.Exception.Message)" -ForegroundColor Red
+    //         }
+    //     } finally {
+    //         Write-Host "[$(Get-Date)] Chocolatey installation attempt finished." -ForegroundColor Cyan
+    //     }
+    //     "
+    
     const psContent = `
         # PowerShell script to install Chocolatey as Administrator
         Start-Transcript -Path "${logPath}" -Append
@@ -43,58 +101,56 @@ async function installChocolatey() {
         try {
             Write-Host "[$(Get-Date)] Starting Chocolatey installation process..." -ForegroundColor Green
             
-            # Set execution policy
+            # 1. Set execution policy
             Write-Host "[$(Get-Date)] Setting execution policy..." -ForegroundColor Yellow
-            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
+            # Scope: Process only affects the current session, safer and common for this task
+            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
             
-            # Install Chocolatey using official installation script
-            Write-Host "[$(Get-Date)] Downloading and executing Chocolatey installation script..." -ForegroundColor Yellow
-            $installScript = @"
-                \$ErrorActionPreference = "Stop"
-                \$ProgressPreference = 'SilentlyContinue'
-                Set-PSDebug -Trace 2
-                
-                Write-Host "Setting up Chocolatey..." 3>$null
-                Invoke-Expression (Invoke-WebRequest https://chocolatey.org/install.ps1 -UseBasicParsing).Content
-                Write-Host "Chocolatey setup completed." 3>$null
-                "@
+            # Set standard script preferences
+            $ErrorActionPreference = "Stop"
+            $ProgressPreference = 'SilentlyContinue'
             
-            Invoke-Expression $installScript
+            # 2. Install Chocolatey using official installation script
+            Write-Host "[$(Get-Date)] Downloading and executing official Chocolatey installation script..." -ForegroundColor Yellow
             
-            # Refresh environment variables
-            Write-Host "[$(Get-Date)] Refreshing environment variables..." -ForegroundColor Yellow
-            \$env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+            # Standard installation command - simplified and direct
+            Invoke-Expression (
+                Invoke-WebRequest https://chocolatey.org/install.ps1 -UseBasicParsing
+            ).Content
             
-            # Verify installation
+            # 3. Verify installation
             Write-Host "[$(Get-Date)] Verifying Chocolatey installation..." -ForegroundColor Yellow
-            choco --version
+            # The Chocolatey install script sets the path, but 'refreshenv' ensures it's available.
+            # Note: If choco is not immediately found, refreshenv won't work. We test choco --version first.
             
+            # Check if choco is immediately available
+            $chocoVersion = choco --version
+            
+            if (-not $chocoVersion) {
+                # Optional: Attempt to refresh path for the current session (though usually not necessary)
+                Write-Host "[$(Get-Date)] Chocolatey path not immediately available. Attempting refresh..." -ForegroundColor DarkYellow
+                # Use the refreshenv command that is installed by Chocolatey
+                refreshenv
+                # Re-check the version
+                $chocoVersion = choco --version
+            }
+            
+            Write-Host "[$(Get-Date)] Chocolatey Version: $chocoVersion" -ForegroundColor Green
             Write-Host "[$(Get-Date)] Chocolatey installation completed successfully!" -ForegroundColor Green
             
         } catch {
-            Write-Host "[$(Get-Date)] ERROR: Chocolatey installation failed: \$(\$_.Exception.Message)" -ForegroundColor Red
-            Write-Host "[$(Get-Date)] Full error details: \$(\$_.Exception)" -ForegroundColor Red
+            # The official error message for the failed attempt
+            Write-Host "[$(Get-Date)] ERROR: Chocolatey installation failed: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[$(Get-Date)] Full error details: $($_.Exception)" -ForegroundColor Red
             
-            # Try alternative installation method
-            try {
-                Write-Host "[$(Get-Date)] Attempting alternative installation method..." -ForegroundColor Yellow
-                
-                # Get PowerShell version and download appropriate installer
-                if (\$PSVersionTable.PSVersion.Major -ge 5) {
-                    Invoke-RestMethod -Uri "https://community.chocolatey.org/api/v2/packages/chocolatey" -UseBasicParsing | Invoke-RestMethod -ContentType "application/json" | Invoke-Expression
-                } else {
-                    Write-Host "[$(Get-Date)] PowerShell version too old for Chocolatey installation" -ForegroundColor Red
-                }
-                
-                Write-Host "[$(Get-Date)] Alternative installation method completed." -ForegroundColor Green
-                
-            } catch {
-                Write-Host "[$(Get-Date)] Alternative installation method also failed: \$(\$_.Exception.Message)" -ForegroundColor Red
-            }
+            # No need for a flawed 'alternative' install. The most common fix is user intervention 
+            # (e.g., checking firewall, proxy, or permissions).
+            Write-Host "[$(Get-Date)] Please check network connection, firewall rules, and execution permissions." -ForegroundColor Red
+            
         } finally {
             Write-Host "[$(Get-Date)] Chocolatey installation attempt finished." -ForegroundColor Cyan
         }
-        
+
         Stop-Transcript
     `;
 

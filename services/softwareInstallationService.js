@@ -61,6 +61,7 @@ function getInstallPath(softwareName) {
 }
 
 function createShortcut(softwareName, installPath) {
+    console.log("createShortcut================>>>>>>: ", softwareName, installPath);
     if (!installPath) {
         console.log(`Cannot create shortcut: Installation path not found.`);
         return;
@@ -69,32 +70,87 @@ function createShortcut(softwareName, installPath) {
     let targetPath = installPath;
     try {
         const files = fs.readdirSync(installPath);
-        const exeFiles = files.filter(file => file.endsWith('.exe'));
+        const exeFiles = files
+            .filter(f => f.endsWith(".exe"))
+            .filter(f => !/unins(tall)?|setup|update|helper/i.test(f)); // skip common non-launchers
+
         if (exeFiles.length > 0) {
-            const matchingSoftwareExe = exeFiles.find(file =>
-                file.toLowerCase().includes(softwareName.toLowerCase())
-            );
-            const exeFile = matchingSoftwareExe || exeFiles[0];
+            const lowerName = softwareName.toLowerCase();
+
+            let exeFile =
+                exeFiles.find(f => f.toLowerCase() === `${lowerName}.exe`) ||
+                exeFiles.find(f => f.toLowerCase().startsWith(lowerName)) ||
+                exeFiles.find(f => f.toLowerCase().includes(lowerName)) ||
+                exeFiles[0]; // fallback
+
             targetPath = path.join(installPath, exeFile);
+            console.log("targetPath: ", targetPath);
         }
     } catch (error) {
         console.log(`Warning: Could not read directory contents: ${error.message}`);
     }
 
+    const tempDir = os.tmpdir();
+    const scriptPath = path.join(tempDir, `${softwareName}-createShortcut.ps1`);
+    const logPath = path.join(tempDir, `${softwareName}-createShortcut.log`);
+    const taskName = `ShortcutCreation_${softwareName}_${Date.now()}`;
+    const startTime = getFutureTime(1);
+
     const desktopPath = path.join(os.homedir(), "Desktop");
     const shortcutPath = path.join(desktopPath, `${softwareName}.lnk`);
 
     const powershellCmd = `
+        Start-Transcript -Path "${logPath}" -Append
         $WScriptShell = New-Object -ComObject WScript.Shell;
         $Shortcut = $WScriptShell.CreateShortcut('${shortcutPath}');
         $Shortcut.TargetPath = '${targetPath}';
         $Shortcut.WorkingDirectory = '${path.dirname(targetPath)}';
         $Shortcut.Save();
+        Stop-Transcript
     `;
-
+    fs.writeFileSync(scriptPath, powershellCmd);
+    const escapedScriptPath = scriptPath.replace(/\\/g, '\\\\');
+    console.log("powershellCmd: ", powershellCmd);
     try {
-        execSync(`powershell -Command "${powershellCmd}"`);
-        console.log(`Shortcut created on Desktop for ${softwareName}`);
+        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU "%USERNAME%" /F`;
+
+        execSync(taskCmd, { encoding: "utf-8" });
+
+        // let logss = execSync(`powershell -Command "${powershellCmd}"`, { encoding: "utf-8" });
+        // console.log("logss: ", logss);
+
+        console.log(`Shortcut creation scheduled on Desktop for ${softwareName}. It'll appear by ${getFutureTime(2)}`);
+
+
+        setTimeout(async () => {
+            console.log(`\n🧹 Running cleanup for ${softwareName}...`);
+
+            try {
+                const logText = fs.readFileSync(logPath, "utf8");
+                console.log(`Log Preview:\n${logText.slice(-1000)}`);
+            } catch {
+                console.log("⚠️ No log available.");
+            }
+
+            try {
+                execSync(`schtasks /Delete /TN "${taskName}" /F`);
+                console.log(`🗑 Deleted task: ${taskName}`);
+            } catch (err) {
+                console.log(`⚠️ Could not delete task: ${err.message}`);
+            }
+
+            try {
+                fs.unlinkSync(scriptPath);
+                console.log(`🗑 Deleted script: ${scriptPath}`);
+            } catch { }
+
+            try {
+                fs.unlinkSync(logPath);
+                console.log(`🗑 Deleted log: ${logPath}`);
+            } catch { }
+
+        }, 180000); // cleanup after 3 minutes
+
     } catch (error) {
         console.log(`Failed to create shortcut: ${error.message}`);
     }
@@ -171,7 +227,7 @@ async function installViaScheduledTask(softwareName) {
 
     const psContent = `
         Start-Transcript -Path "${logPath}" -Append
-        choco install ${softwareName} -y --no-progress --force 
+        choco install ${softwareName} -y --no-progress --force --install-arguments "/allusers /silent"
         Stop-Transcript
     `;
     fs.writeFileSync(scriptPath, psContent);
@@ -184,18 +240,22 @@ async function installViaScheduledTask(softwareName) {
     const escapedScriptPath = scriptPath.replace(/\\/g, '\\\\');
 
     try {
-        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU SYSTEM /F`;
+        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU ${softwareName.toLowerCase().includes('brave') || softwareName.toLowerCase().includes('atom') ? '"%USERNAME%"' : 'SYSTEM'} /F`;
 
         // const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU SYSTEM /F`;
 
         // schtasks /Create /TN "SilentInstall_brave" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\\Temp\\brave-install.ps1\"" /SC ONCE /ST 23:59 /RL HIGHEST /RU "%USERNAME%" /F
 
         execSync(taskCmd);
-        // execSync(`schtasks /Run /TN "${taskName}"`);
+        // execSync(`schtasks /Run /TN "${taskName}"`);.
+
+        // Explicitly allow battery operation by tweaking the task XML
+        // execSync(`PowerShell -Command "$task = Get-ScheduledTask -TaskName '${taskName}'; $task.Settings.AllowStartIfOnBatteries = $true; $task.Settings.DisallowStartIfOnBatteries = $false; $task.Settings.StopIfGoingOnBatteries = $false; Set-ScheduledTask -InputObject $task"`);
+
         console.log(`✅ ${softwareName} installation scheduled silently (no visible terminal).`);
 
         // Cleanup after delay
-        setTimeout(() => {
+        setTimeout(async () => {
             console.log(`\n🧹 Running cleanup for ${softwareName}...`);
 
             try {
@@ -205,8 +265,29 @@ async function installViaScheduledTask(softwareName) {
                 console.log(`📦 Software deployed to: ${deployPath}`);
                 // Optionally: create shortcut here automatically
                 createShortcut(softwareName, deployPath);
+                console.log("Creating history for successful installation of ", softwareName);
+                const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+                    serial_number: await getSerialNumber(),
+                    software_name: softwareName,
+                    isSuccessful: true
+                }).then(response => {
+                    console.log("History created: ", response.data);
+                }).catch(error => {
+                    console.error("Error creating history: ", error.message);
+                    return;
+                });
             } catch {
                 console.log("⚠️ No log available.");
+                const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+                    serial_number: await getSerialNumber(),
+                    software_name: softwareName,
+                    isSuccessful: false
+                }).then(response => {
+                    console.log("History created: ", response.data);
+                }).catch(error => {
+                    console.error("Error creating history: ", error.message);
+                    return;
+                });
             }
 
             try {
@@ -228,16 +309,6 @@ async function installViaScheduledTask(softwareName) {
 
         }, 300000); // cleanup after 5 minutes
 
-        const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
-            serial_number: await getSerialNumber(),
-            software_name: softwareName,
-            isSuccessful: true
-        }).then(response => {
-            console.log("History created: ", response.data);
-        }).catch(error => {
-            console.error("Error creating history: ", error.message);
-            return;
-        });
     } catch (error) {
         const createHistory = await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
             serial_number: await getSerialNumber(),
@@ -295,6 +366,9 @@ const demoFunction = async () => {
     }
 }
 demoFunction();
+
+// createShortcut('brave', 'C:\\WINDOWS\\system32\\config\\systemprofile\\AppData\\Local\\BraveSoftware\\Brave-Browser\\Application')
+// createShortcut('atom', 'C:\\WINDOWS\\SysWOW64\\config\\systemprofile\\AppData\\Local\\atom')
 
 function extractDeploymentPath(logContent) {
     // Regex to match the "Deployed to 'C:\ProgramData\chocolatey\lib\discord'" line

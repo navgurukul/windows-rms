@@ -6,7 +6,7 @@ const { setWallpaper } = require('./services/updateWallpaperWithVBS');
 const { installSoftware } = require('./services/softwareInstallationService');
 const { ensureChocolateyInstalled } = require('./services/chocolateyService');
 const axios = require('axios');
-// const autoUpdater = require('./services/autoUpdaterService');
+const autoUpdater = require('./services/autoUpdaterService');
 
 // Globals
 let mainWindow;
@@ -155,7 +155,7 @@ app.whenReady().then(async () => {
   await startMetricsCollection();
   mainWindow = createWindow();
 
-  // autoUpdater.startPeriodicUpdateChecks(6 * 60 * 60 * 1000); // 6 hours
+  autoUpdater.startPeriodicUpdateChecks(6 * 60 * 60 * 1000); // 6 hours
   await fetchAndSetWallpaper();
 
   app.on('activate', () => {
@@ -172,7 +172,7 @@ async function handleShutdown() {
     if (metricsInterval) clearInterval(metricsInterval);
     if (syncInterval) clearInterval(syncInterval);
 
-    // autoUpdater.stopPeriodicUpdateChecks();
+    autoUpdater.stopPeriodicUpdateChecks();
 
     const forceQuitTimeout = setTimeout(() => {
       console.log('Forcing app quit due to timeout...');
