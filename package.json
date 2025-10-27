@@ -1,6 +1,6 @@
 {
   "name": "sama-system-admin",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Sama System Administration Tool",
   "main": "main.js",
   "scripts": {
