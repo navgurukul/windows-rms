@@ -227,7 +227,7 @@ async function installViaScheduledTask(softwareName) {
 
     const psContent = `
         Start-Transcript -Path "${logPath}" -Append
-        choco install ${softwareName} -y --no-progress --force --install-arguments "/allusers /silent"
+        choco install ${softwareName} -y --no-progress --force"
         Stop-Transcript
     `;
     fs.writeFileSync(scriptPath, psContent);
