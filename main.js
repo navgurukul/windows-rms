@@ -5,7 +5,7 @@ const metricService = require('./services/metricService');
 const { setWallpaper } = require('./services/updateWallpaperWithVBS');
 const softwareInstallation = require('./services/softwareInstallUsingWinget');
 // const { installSoftware } = require('./services/softwareInstallationService');
-const { ensureChocolateyInstalled } = require('./services/chocolateyService');
+// const { ensureChocolateyInstalled } = require('./services/chocolateyService');
 const axios = require('axios');
 const autoUpdater = require('./services/autoUpdaterService');
 
@@ -78,8 +78,8 @@ console.warn = (...args) => {
     console.log(response.data);
 
     // Check if Chocolatey is installed
-    const chocolateyInstalled = await ensureChocolateyInstalled();
-    console.log(chocolateyInstalled);
+    // const chocolateyInstalled = await ensureChocolateyInstalled();
+    // console.log(chocolateyInstalled);
 
   } catch (error) {
     console.error("Error syncing data to server:", error);
