@@ -6,6 +6,7 @@ const { setWallpaper } = require('./services/updateWallpaperWithVBS');
 const softwareInstallation = require('./services/softwareInstallUsingWinget');
 // const { installSoftware } = require('./services/softwareInstallationService');
 // const { ensureChocolateyInstalled } = require('./services/chocolateyService');
+const { ensureWingetIsInstalled } = require('./services/wingetService')
 const axios = require('axios');
 const autoUpdater = require('./services/autoUpdaterService');
 
@@ -79,7 +80,11 @@ console.warn = (...args) => {
 
     // Check if Chocolatey is installed
     // const chocolateyInstalled = await ensureChocolateyInstalled();
-    // console.log(chocolateyInstalled);
+    
+    // Check if Winget is installed
+    const wingetInstalled = await ensureWingetIsInstalled();
+    
+    console.log(wingetInstalled);
 
   } catch (error) {
     console.error("Error syncing data to server:", error);
