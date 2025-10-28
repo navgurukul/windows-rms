@@ -1,13 +1,91 @@
 <!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>System Admin</title>
-  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
-</head>
-<body>
-  <h1>Windows RMS</h1>
-  <div id="app-content"></div>
-  <script src="./client.js"></script>
-</body>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Windows RMS</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="script-src 'self' 'unsafe-inline';"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: "Poppins", sans-serif;
+        background: linear-gradient(135deg, #141414, #1e1e1e);
+        color: #eaeaea;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      header {
+        text-align: center;
+        font-size: 26px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        color: #fff;
+        padding: 14px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px);
+      }
+
+      #log-container {
+        flex: 1;
+        padding: 12px 20px;
+        overflow-y: auto;
+        font-size: 13px;
+        line-height: 1.5;
+        background: transparent;
+      }
+
+      .log-entry {
+        margin: 2px 0;
+        padding: 2px 0;
+        border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+      }
+
+      .log-time {
+        opacity: 0.6;
+        margin-right: 6px;
+      }
+
+      .log-error {
+        color: #ff6b6b;
+      }
+      .log-warn {
+        color: #feca57;
+      }
+      .log-info {
+        color: #a8e6cf;
+      }
+
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+    </style>
+  </head>
+  <body>
+    <header>Windows RMS</header>
+    <div id="log-container"></div>
+    <script src="./client.js"></script>
+  </body>
 </html>

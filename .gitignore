@@ -9,5 +9,6 @@ node_modules/
 
 # Ignore logs folder and its content
 logs/
+utils/logs/
 
 data/

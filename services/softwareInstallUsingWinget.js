@@ -1,3 +1,4 @@
+require("../utils/logger");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -10,7 +11,8 @@ const { getSerialNumber } = require('./metricService');
 // ==========================
 // installViaWingetTask()
 // ==========================
-async function installViaWingetTask(software_name, softwareId) {
+
+async function installViaWingetTask(software_name, softwareId, length) {
     const tempDir = os.tmpdir();
     const scriptPath = path.join(tempDir, `${softwareId}-winget-install.ps1`);
     const logPath = path.join(tempDir, `${softwareId}-winget-install.log`);
@@ -82,7 +84,7 @@ async function installViaWingetTask(software_name, softwareId) {
 
             try { fs.unlinkSync(scriptPath); } catch { }
             try { fs.unlinkSync(logPath); } catch { }
-        }, 300000); // cleanup after 5 mins
+        }, 300000 * length); // cleanup after 5 mins
 
     } catch (error) {
         console.error(`❌ Scheduled task failed: ${error.message}`);
@@ -145,7 +147,7 @@ const demoFunction = async () => {
             for (const software of notInstalled) {
                 const { software_name, winget_id } = software;
                 console.log(`🧩 Installing: ${software_name} (${winget_id})`);
-                await installViaWingetTask(software_name, winget_id); // pass both params
+                await installViaWingetTask(software_name, winget_id, notInstalled.length);
             }
         }, 2000);
     } catch (error) {

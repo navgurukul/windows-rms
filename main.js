@@ -1,3 +1,4 @@
+require("./utils/logger");
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const config = require('./config/config');
@@ -80,10 +81,10 @@ console.warn = (...args) => {
 
     // Check if Chocolatey is installed
     // const chocolateyInstalled = await ensureChocolateyInstalled();
-    
+
     // Check if Winget is installed
     const wingetInstalled = await ensureWingetIsInstalled();
-    
+
     console.log(wingetInstalled);
 
   } catch (error) {
@@ -132,8 +133,10 @@ async function startMetricsCollection() {
 // -------------------- WINDOW --------------------
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 400,
-    height: 400,
+    width: 1000,
+    height: 700,
+    minWidth: 900,
+    minHeight: 600,
     skipTaskbar: true,
     icon: path.join(__dirname, 'icons', 'sama.ico'),
     webPreferences: {

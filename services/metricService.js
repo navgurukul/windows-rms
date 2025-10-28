@@ -1,3 +1,4 @@
+require("../utils/logger");
 const os = require('os');
 const fs = require('fs').promises;
 const path = require('path');
@@ -432,47 +433,118 @@ async function getMacAddress() {
   }
 }
 
+async function ensureWmiHealthy() {
+  try {
+    console.log('Checking WMI service health...');
+
+    // 1. Check service status
+    const { stdout: status } = await execAsync(
+      'powershell -Command "(Get-Service winmgmt).Status"',
+      { timeout: 5000 }
+    );
+    if (!status.toLowerCase().includes('running')) {
+      console.warn('WMI service not running — starting...');
+      await execAsync('powershell -Command "Start-Service winmgmt"', { timeout: 8000 });
+    }
+
+    // 2. Verify repository
+    const { stdout: verify } = await execAsync(
+      'powershell -Command "winmgmt /verifyrepository"',
+      { timeout: 8000 }
+    );
+
+    if (verify.includes('inconsistent') || verify.includes('corrupt')) {
+      console.warn('WMI repository inconsistent — attempting salvage...');
+      await execAsync('powershell -Command "winmgmt /salvagerepository"', { timeout: 15000 });
+    }
+
+    console.log('WMI health check complete. Healthy.');
+    return true;
+  } catch (err) {
+    console.error('WMI health check failed:', err.message);
+    return false;
+  }
+}
+
 async function getSerialNumber() {
   try {
-    // Third attempt: PowerShell (more reliable on newer Windows systems)
-    try {
-      const { stdout: psOutput } = await execAsync('powershell -command "Get-WmiObject -Class Win32_BIOS | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
-      const psSerial = psOutput.trim();
-      if (psSerial && psSerial !== 'To be filled by O.E.M.' && psSerial !== 'Default string') {
-        return psSerial;
+    // First ensure WMI is working
+    await ensureWmiHealthy();
+
+    // Try multiple WMI classes
+    const attempts = [
+      'Get-WmiObject -Class Win32_BIOS | Select-Object -ExpandProperty SerialNumber',
+      'Get-WmiObject -Class Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber',
+      'Get-WmiObject -Class Win32_SystemEnclosure | Select-Object -ExpandProperty SerialNumber',
+    ];
+
+    for (const cmd of attempts) {
+      try {
+        const { stdout } = await execAsync(`powershell -command "${cmd}"`, { timeout: 5000 });
+        const serial = stdout.trim();
+
+        if (
+          serial &&
+          serial !== 'To be filled by O.E.M.' &&
+          serial !== 'Default string' &&
+          serial.toLowerCase() !== 'none'
+        ) {
+          return serial;
+        }
+      } catch (error) {
+        console.log(`WMI query failed (${cmd.split('|')[0].trim()}):`, error.message);
       }
-    } catch (error) {
-      console.log('PowerShell BIOS method failed:', error.message);
     }
 
-    // Fourth attempt: Another PowerShell approach
-    try {
-      const { stdout: psBaseboard } = await execAsync('powershell -command "Get-WmiObject -Class Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
-      const psBoardSerial = psBaseboard.trim();
-      if (psBoardSerial && psBoardSerial !== 'To be filled by O.E.M.' && psBoardSerial !== 'Default string') {
-        return psBoardSerial;
-      }
-    } catch (error) {
-      console.log('PowerShell BaseBoard method failed:', error.message);
-    }
-
-    // Additional fallback for Windows: try the system enclosure
-    try {
-      const { stdout: enclosureOutput } = await execAsync('powershell -command "Get-WmiObject -Class Win32_SystemEnclosure | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
-      const enclosureSerial = enclosureOutput.trim();
-      if (enclosureSerial && enclosureSerial !== 'To be filled by O.E.M.' && enclosureSerial !== 'Default string') {
-        return enclosureSerial;
-      }
-    } catch (error) {
-      console.log('System Enclosure method failed:', error.message);
-    }
-
+    console.warn('All WMI serial number queries failed — returning "Unknown".');
     return 'Unknown';
   } catch (error) {
     console.error('Critical error in serial number detection:', error);
     return 'Unknown';
   }
 }
+
+// async function getSerialNumber() {
+//   try {
+//     // Third attempt: PowerShell (more reliable on newer Windows systems)
+//     try {
+//       const { stdout: psOutput } = await execAsync('powershell -command "Get-WmiObject -Class Win32_BIOS | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
+//       const psSerial = psOutput.trim();
+//       if (psSerial && psSerial !== 'To be filled by O.E.M.' && psSerial !== 'Default string') {
+//         return psSerial;
+//       }
+//     } catch (error) {
+//       console.log('PowerShell BIOS method failed:', error.message);
+//     }
+
+//     // Fourth attempt: Another PowerShell approach
+//     try {
+//       const { stdout: psBaseboard } = await execAsync('powershell -command "Get-WmiObject -Class Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
+//       const psBoardSerial = psBaseboard.trim();
+//       if (psBoardSerial && psBoardSerial !== 'To be filled by O.E.M.' && psBoardSerial !== 'Default string') {
+//         return psBoardSerial;
+//       }
+//     } catch (error) {
+//       console.log('PowerShell BaseBoard method failed:', error.message);
+//     }
+
+//     // Additional fallback for Windows: try the system enclosure
+//     try {
+//       const { stdout: enclosureOutput } = await execAsync('powershell -command "Get-WmiObject -Class Win32_SystemEnclosure | Select-Object -ExpandProperty SerialNumber"', { timeout: 5000 });
+//       const enclosureSerial = enclosureOutput.trim();
+//       if (enclosureSerial && enclosureSerial !== 'To be filled by O.E.M.' && enclosureSerial !== 'Default string') {
+//         return enclosureSerial;
+//       }
+//     } catch (error) {
+//       console.log('System Enclosure method failed:', error.message);
+//     }
+
+//     return 'Unknown';
+//   } catch (error) {
+//     console.error('Critical error in serial number detection:', error);
+//     return 'Unknown';
+//   }
+// }
 
 async function getUsername() {
   try {
