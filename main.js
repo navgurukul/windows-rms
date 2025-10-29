@@ -10,6 +10,7 @@ const softwareInstallation = require('./services/softwareInstallUsingWinget');
 const { ensureWingetIsInstalled } = require('./services/wingetService')
 const axios = require('axios');
 const autoUpdater = require('./services/autoUpdaterService');
+const { execSync } = require("child_process");
 
 // Globals
 let mainWindow;
@@ -66,16 +67,50 @@ console.warn = (...args) => {
   sendLogToWindow('warn', ...args);
 };
 
+// -------------------- AUTO STARTUP REGISTRATION --------------------
+function registerAsStartup() {
+  try {
+    const appPath = process.execPath;
+    const runKey = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`;
+    const regQuery = `reg query "${runKey}" /v "SAMAClient"`;
+
+    try {
+      execSync(regQuery, { stdio: "ignore" });
+      console.log("Startup entry already exists.");
+    } catch {
+      console.log("Startup entry not found. Registering...");
+      const addCmd = `reg add "${runKey}" /v "SAMAClient" /d "${appPath}" /f`;
+      execSync(addCmd);
+      console.log("Startup entry added successfully.");
+    }
+  } catch (err) {
+    console.error("Error registering startup entry:", err.message);
+  }
+}
+
 // -------------------- STARTUP TASKS --------------------
 
 (async () => {
   try {
+
     const response = await axios.post(`${config.BACKEND_BASE_URL}/api/devices`, {
       username: await metricService.getUsername(),
       serial_number: await metricService.getSerialNumber(),
       mac_address: await metricService.getMacAddress(),
       location: await metricService.getGeolocation(),
     });
+    if (response.status === 200) {
+      console.log('Device registered successfully');
+    } else {
+      console.error('Failed to register device');
+    }
+    registerAsStartup();
+
+    await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
+      serial_number: await metricService.getSerialNumber(),
+      isActive: true,
+    });
+
     console.log("Synced data to server");
     console.log(response.data);
 
@@ -84,7 +119,6 @@ console.warn = (...args) => {
 
     // Check if Winget is installed
     const wingetInstalled = await ensureWingetIsInstalled();
-
     console.log(wingetInstalled);
 
   } catch (error) {
@@ -146,15 +180,17 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile('index.html');
+  if (config.withUI) {
+    mainWindow.loadFile('index.html');
 
-  mainWindow.webContents.on('did-finish-load', () => {
-    flushLogBuffer();
-  });
+    mainWindow.webContents.on('did-finish-load', () => {
+      flushLogBuffer();
+    });
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+    mainWindow.on('closed', () => {
+      mainWindow = null;
+    });
+  }
 
   return mainWindow;
 }
@@ -162,15 +198,17 @@ function createWindow() {
 // -------------------- APP LIFECYCLE --------------------
 app.whenReady().then(async () => {
   await startMetricsCollection();
-  mainWindow = createWindow();
+  if (config.withUI) mainWindow = createWindow();
 
   autoUpdater.startPeriodicUpdateChecks(6 * 60 * 60 * 1000); // 6 hours
   await fetchAndSetWallpaper();
 
-  app.on('activate', () => {
-    if (mainWindow === null) createWindow();
+  app.on("activate", () => {
+    if (config.withUI && mainWindow === null) createWindow();
   });
 });
+
+// -------------------- SHUTDOWN HANDLING --------------------
 
 async function handleShutdown() {
   if (isShuttingDown) return;
@@ -182,6 +220,11 @@ async function handleShutdown() {
     if (syncInterval) clearInterval(syncInterval);
 
     autoUpdater.stopPeriodicUpdateChecks();
+
+    await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
+      serial_number: await metricService.getSerialNumber(),
+      isActive: false,
+    });
 
     const forceQuitTimeout = setTimeout(() => {
       console.log('Forcing app quit due to timeout...');

@@ -20,5 +20,6 @@ module.exports = {
   SYSTEM_DATA_FOLDER: 'C:\\System.ServiceData',
   // JSON storage location
   JSON_FOLDER_NAME: 'SystemDataStorage',
-  JSON_FILE_NAME: 'sysdata_repository.json'
+  JSON_FILE_NAME: 'sysdata_repository.json',
+  withUI: true
 };
