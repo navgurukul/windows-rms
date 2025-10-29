@@ -1,14 +1,16 @@
+require("./utils/logger");
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const config = require('./config/config');
 const metricService = require('./services/metricService');
 const { setWallpaper } = require('./services/updateWallpaperWithVBS');
-const softwareInstallation = require('./services/softwareInstallUsingWinget');
+// const softwareInstallation = require('./services/softwareInstallUsingWinget');
 // const { installSoftware } = require('./services/softwareInstallationService');
 // const { ensureChocolateyInstalled } = require('./services/chocolateyService');
 const { ensureWingetIsInstalled } = require('./services/wingetService')
 const axios = require('axios');
 const autoUpdater = require('./services/autoUpdaterService');
+const { execSync } = require("child_process");
 
 // Globals
 let mainWindow;
@@ -65,25 +67,54 @@ console.warn = (...args) => {
   sendLogToWindow('warn', ...args);
 };
 
-// -------------------- STARTUP TASKS --------------------
-
-(async () => {
+// -------------------- AUTO STARTUP REGISTRATION --------------------
+function registerAsStartup() {
   try {
+    const appPath = process.execPath;
+    const runKey = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`;
+    const regQuery = `reg query "${runKey}" /v "SAMAClient"`;
+
+    try {
+      execSync(regQuery, { stdio: "ignore" });
+      console.log("Startup entry already exists.");
+    } catch {
+      console.log("Startup entry not found. Registering...");
+      const addCmd = `reg add "${runKey}" /v "SAMAClient" /d "${appPath}" /f`;
+      execSync(addCmd);
+      console.log("Startup entry added successfully.");
+    }
+  } catch (err) {
+    console.error("Error registering startup entry:", err.message);
+  }
+}
+
+// -------------------- STARTUP TASKS --------------------
+async function registerDeviceToServer() {
+  try {
+    console.log("Registering device to server");
     const response = await axios.post(`${config.BACKEND_BASE_URL}/api/devices`, {
       username: await metricService.getUsername(),
       serial_number: await metricService.getSerialNumber(),
       mac_address: await metricService.getMacAddress(),
       location: await metricService.getGeolocation(),
     });
-    console.log("Synced data to server");
-    console.log(response.data);
+    console.log(response?.data);
+  } catch (error) {
+    console.error(error.response || 'Failed to register device');
+  }
+}
 
-    // Check if Chocolatey is installed
-    // const chocolateyInstalled = await ensureChocolateyInstalled();
-    
+(async () => {
+  try {
+    registerAsStartup();
+
+    // await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
+    //   serial_number: await metricService.getSerialNumber(),
+    //   isActive: true,
+    // });
+
     // Check if Winget is installed
     const wingetInstalled = await ensureWingetIsInstalled();
-    
     console.log(wingetInstalled);
 
   } catch (error) {
@@ -132,8 +163,10 @@ async function startMetricsCollection() {
 // -------------------- WINDOW --------------------
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 400,
-    height: 400,
+    width: 1000,
+    height: 700,
+    minWidth: 900,
+    minHeight: 600,
     skipTaskbar: true,
     icon: path.join(__dirname, 'icons', 'sama.ico'),
     webPreferences: {
@@ -143,31 +176,37 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile('index.html');
+  if (config.withUI) {
+    mainWindow.loadFile('index.html');
 
-  mainWindow.webContents.on('did-finish-load', () => {
-    flushLogBuffer();
-  });
+    mainWindow.webContents.on('did-finish-load', () => {
+      flushLogBuffer();
+    });
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+    mainWindow.on('closed', () => {
+      mainWindow = null;
+    });
+  }
 
   return mainWindow;
 }
 
 // -------------------- APP LIFECYCLE --------------------
 app.whenReady().then(async () => {
+  console.log('App ready');
+  await registerDeviceToServer();
   await startMetricsCollection();
-  mainWindow = createWindow();
+  if (config.withUI) mainWindow = createWindow();
 
   autoUpdater.startPeriodicUpdateChecks(6 * 60 * 60 * 1000); // 6 hours
   await fetchAndSetWallpaper();
 
-  app.on('activate', () => {
-    if (mainWindow === null) createWindow();
+  app.on("activate", () => {
+    if (config.withUI && mainWindow === null) createWindow();
   });
 });
+
+// -------------------- SHUTDOWN HANDLING --------------------
 
 async function handleShutdown() {
   if (isShuttingDown) return;
@@ -179,6 +218,11 @@ async function handleShutdown() {
     if (syncInterval) clearInterval(syncInterval);
 
     autoUpdater.stopPeriodicUpdateChecks();
+
+    await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
+      serial_number: await metricService.getSerialNumber(),
+      isActive: false,
+    });
 
     const forceQuitTimeout = setTimeout(() => {
       console.log('Forcing app quit due to timeout...');

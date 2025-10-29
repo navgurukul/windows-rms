@@ -1,3 +1,4 @@
+require("../utils/logger");
 const { execSync } = require("child_process");
 const os = require("os");
 const path = require("path");

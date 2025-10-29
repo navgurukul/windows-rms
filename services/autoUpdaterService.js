@@ -1,3 +1,4 @@
+require("../utils/logger");
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 
