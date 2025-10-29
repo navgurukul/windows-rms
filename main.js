@@ -4,7 +4,7 @@ const path = require('path');
 const config = require('./config/config');
 const metricService = require('./services/metricService');
 const { setWallpaper } = require('./services/updateWallpaperWithVBS');
-const softwareInstallation = require('./services/softwareInstallUsingWinget');
+// const softwareInstallation = require('./services/softwareInstallUsingWinget');
 // const { installSoftware } = require('./services/softwareInstallationService');
 // const { ensureChocolateyInstalled } = require('./services/chocolateyService');
 const { ensureWingetIsInstalled } = require('./services/wingetService')
@@ -89,33 +89,29 @@ function registerAsStartup() {
 }
 
 // -------------------- STARTUP TASKS --------------------
-
-(async () => {
+async function registerDeviceToServer() {
   try {
-
+    console.log("Registering device to server");
     const response = await axios.post(`${config.BACKEND_BASE_URL}/api/devices`, {
       username: await metricService.getUsername(),
       serial_number: await metricService.getSerialNumber(),
       mac_address: await metricService.getMacAddress(),
       location: await metricService.getGeolocation(),
     });
-    if (response.status === 200) {
-      console.log('Device registered successfully');
-    } else {
-      console.error('Failed to register device');
-    }
+    console.log(response?.data);
+  } catch (error) {
+    console.error(error.response || 'Failed to register device');
+  }
+}
+
+(async () => {
+  try {
     registerAsStartup();
 
-    await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
-      serial_number: await metricService.getSerialNumber(),
-      isActive: true,
-    });
-
-    console.log("Synced data to server");
-    console.log(response.data);
-
-    // Check if Chocolatey is installed
-    // const chocolateyInstalled = await ensureChocolateyInstalled();
+    // await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
+    //   serial_number: await metricService.getSerialNumber(),
+    //   isActive: true,
+    // });
 
     // Check if Winget is installed
     const wingetInstalled = await ensureWingetIsInstalled();
@@ -197,6 +193,8 @@ function createWindow() {
 
 // -------------------- APP LIFECYCLE --------------------
 app.whenReady().then(async () => {
+  console.log('App ready');
+  await registerDeviceToServer();
   await startMetricsCollection();
   if (config.withUI) mainWindow = createWindow();
 
