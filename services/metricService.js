@@ -433,35 +433,89 @@ async function getMacAddress() {
   }
 }
 
+// async function ensureWmiHealthy() {
+//   try {
+//     console.log('Checking WMI service health...');
+
+//     // 1. Check service status
+//     const { stdout: status } = await execAsync(
+//       'powershell -Command "(Get-Service winmgmt).Status"',
+//       { timeout: 5000 }
+//     );
+//     if (!status.toLowerCase().includes('running')) {
+//       console.warn('WMI service not running — starting...');
+//       await execAsync('powershell -Command "Start-Service winmgmt"', { timeout: 8000 });
+//     }
+
+//     // 2. Verify repository
+//     const { stdout: verify } = await execAsync(
+//       'powershell -Command "winmgmt /verifyrepository"',
+//       { timeout: 8000 }
+//     );
+
+//     if (verify.includes('inconsistent') || verify.includes('corrupt')) {
+//       console.warn('WMI repository inconsistent — attempting salvage...');
+//       await execAsync('powershell -Command "winmgmt /salvagerepository"', { timeout: 15000 });
+//     }
+
+//     console.log('WMI health check complete. Healthy.');
+//     return true;
+//   } catch (err) {
+//     console.error('WMI health check failed:', err.message);
+//     return false;
+//   }
+// }
+
 async function ensureWmiHealthy() {
   try {
-    console.log('Checking WMI service health...');
+    console.log('[WMI] Checking WMI service health...');
 
-    // 1. Check service status
+    // ✅ 1. Check service status
     const { stdout: status } = await execAsync(
-      'powershell -Command "(Get-Service winmgmt).Status"',
-      { timeout: 5000 }
+      'powershell -Command "(Get-Service winmgmt).Status"'
     );
+
     if (!status.toLowerCase().includes('running')) {
-      console.warn('WMI service not running — starting...');
-      await execAsync('powershell -Command "Start-Service winmgmt"', { timeout: 8000 });
+      console.warn('[WMI] Service not running — trying to start...');
+      await execAsync('powershell -Command "Start-Service winmgmt"');
     }
 
-    // 2. Verify repository
-    const { stdout: verify } = await execAsync(
-      'powershell -Command "winmgmt /verifyrepository"',
-      { timeout: 8000 }
-    );
-
-    if (verify.includes('inconsistent') || verify.includes('corrupt')) {
-      console.warn('WMI repository inconsistent — attempting salvage...');
-      await execAsync('powershell -Command "winmgmt /salvagerepository"', { timeout: 15000 });
+    // ✅ 2. Verify repository — DO NOT rely on exit code!
+    let verifyOutput = '';
+    try {
+      const { stdout } = await execAsync(
+        'powershell -Command "winmgmt /verifyrepository"'
+      );
+      verifyOutput = stdout;
+    } catch (e) {
+      // Even if exit code is non-zero, stdout contains message
+      verifyOutput = e.stdout || e.message || '';
     }
 
-    console.log('WMI health check complete. Healthy.');
+    const lower = verifyOutput.toLowerCase();
+
+    if (lower.includes('inconsistent') || lower.includes('corrupt')) {
+      console.warn('[WMI] Inconsistent — attempting salvage...');
+      try {
+        await execAsync('powershell -Command "winmgmt /salvagerepository"');
+        console.log('[WMI] Salvage successful.');
+      } catch (e) {
+        console.warn('[WMI] Salvage failed — trying reset...');
+        await execAsync('powershell -Command "winmgmt /resetrepository"');
+        console.log('[WMI] Reset successful.');
+      }
+    }
+
+    console.log('[WMI] Health check complete. Healthy. ✅');
     return true;
+
   } catch (err) {
-    console.error('WMI health check failed:', err.message);
+    // ✅ Log stderr/stdout so you know the real reason
+    console.error('[WMI] Health check failed:', {
+      message: err.message,
+      stdout: err.stdout,
+      stderr: err.stderr
+    });
     return false;
   }
 }

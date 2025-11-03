@@ -1,12 +1,42 @@
 const fs = require("fs");
 const path = require("path");
+const util = require("util");
 
 const LOG_DIR = path.join(__dirname, "logs");
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
-// Daily rotating file
 const LOG_FILE = path.join(LOG_DIR, `${new Date().toISOString().slice(0, 10)}.log`);
-const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5MB
+
+function safeSerialize(a) {
+    // If it's an error, return only useful fields
+    if (a instanceof Error) {
+        return util.inspect({
+            message: a.message,
+            stack: a.stack,
+            code: a.code,
+            status: a.response?.status,
+            url: a.config?.url
+        }, { depth: 3 });
+    }
+
+    try {
+        return JSON.stringify(a);
+    } catch {
+        // fallback that will NEVER throw
+        return util.inspect(a, { depth: 3 });
+    }
+}
+
+function format(level, args) {
+    const timestamp = new Date().toISOString();
+    const levelStr = level ? level.toUpperCase() : "INFO";
+    const message = args.map(a =>
+        typeof a === "object" ? safeSerialize(a) : a
+    ).join(" ");
+
+    return `[${timestamp}] [${levelStr}] ${message}`;
+}
 
 function writeToFile(line) {
     try {
@@ -22,27 +52,16 @@ function writeToFile(line) {
     }
 }
 
-function format(level, args) {
-    const timestamp = new Date().toISOString();
-    const levelStr = level ? level.toUpperCase() : "INFO";
-    const message = args.map(a => (typeof a === "object" ? JSON.stringify(a) : a)).join(" ");
-    // return JSON.stringify({ timestamp, level, message });
-    return `[${timestamp}] [${levelStr}] ${message}`;
-
-}
-
 function centralLogger(level, ...args) {
     const logLine = format(level, args);
 
-    // Always write to console
     if (level === "error") process.stderr.write(logLine + "\n");
     else process.stdout.write(logLine + "\n");
 
-    // Also persist to file
     writeToFile(logLine);
 }
 
-// Hook into console methods
+// Hook into console
 console.log = (...args) => centralLogger("info", ...args);
 console.info = (...args) => centralLogger("info", ...args);
 console.warn = (...args) => centralLogger("warn", ...args);

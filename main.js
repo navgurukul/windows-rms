@@ -4,9 +4,7 @@ const path = require('path');
 const config = require('./config/config');
 const metricService = require('./services/metricService');
 const { setWallpaper } = require('./services/updateWallpaperWithVBS');
-// const softwareInstallation = require('./services/softwareInstallUsingWinget');
-// const { installSoftware } = require('./services/softwareInstallationService');
-// const { ensureChocolateyInstalled } = require('./services/chocolateyService');
+const softwareInstallation = require('./services/softwareInstallUsingWinget');
 const { ensureWingetIsInstalled } = require('./services/wingetService')
 const axios = require('axios');
 const autoUpdater = require('./services/autoUpdaterService');
@@ -69,22 +67,35 @@ console.warn = (...args) => {
 
 // -------------------- AUTO STARTUP REGISTRATION --------------------
 function registerAsStartup() {
-  try {
-    const appPath = process.execPath;
-    const runKey = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`;
-    const regQuery = `reg query "${runKey}" /v "SAMAClient"`;
+  // try {
+  //   const appPath = process.execPath;
+  //   const runKey = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`;
+  //   const regQuery = `reg query "${runKey}" /v "SAMAClient"`;
 
-    try {
-      execSync(regQuery, { stdio: "ignore" });
-      console.log("Startup entry already exists.");
-    } catch {
-      console.log("Startup entry not found. Registering...");
-      const addCmd = `reg add "${runKey}" /v "SAMAClient" /d "${appPath}" /f`;
-      execSync(addCmd);
-      console.log("Startup entry added successfully.");
-    }
+  //   try {
+  //     execSync(regQuery, { stdio: "ignore" });
+  //     console.log("Startup entry already exists.");
+  //   } catch {
+  //     console.log("Startup entry not found. Registering...");
+  //     const addCmd = `reg add "${runKey}" /v "SAMAClient" /d "${appPath}" /f`;
+  //     execSync(addCmd);
+  //     console.log("Startup entry added successfully.");
+  //   }
+  // } catch (err) {
+  //   console.error("Error registering startup entry:", err.message);
+  // }
+  try {
+    // const exePath = process.execPath.replace(/\\/g, "\\\\"); // escape slashes
+
+    const cmd = `SCHTASKS /Create /F /RL HIGHEST /SC ONLOGON /TN "SamaSystemAdmin" /TR "\\"${exePath}\\""`;
+    // const cmd = `SCHTASKS /Create /F /RL HIGHEST /SC ONLOGON /TN "SamaSystemAdmin" /TR "${exePath}"`;
+    // const cmd = `SCHTASKS /Create /F /RL HIGHEST /SC ONLOGON /TN "SamaSystemAdmin" /TR "${exePath} --hidden\"`;
+
+
+    execSync(cmd, { stdio: "ignore" });
+    console.log("✅ Scheduled Task created for startup.");
   } catch (err) {
-    console.error("Error registering startup entry:", err.message);
+    console.error("🚩 Failed to register scheduled task:", err);
   }
 }
 
