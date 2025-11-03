@@ -3,6 +3,7 @@
   "version": "1.2.0",
   "description": "Sama System Administration Tool",
   "main": "main.js",
+  "author": "Navgurukul",
   "scripts": {
     "start": "electron --trace-warnings .",
     "pack": "electron-builder --dir",

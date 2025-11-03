@@ -84,7 +84,7 @@ async function installViaWingetTask(software_name, softwareId, length) {
 
             try { fs.unlinkSync(scriptPath); } catch { }
             try { fs.unlinkSync(logPath); } catch { }
-        }, 300000 * length); // cleanup after 5 mins
+        }, 150000 * length); // cleanup after 2.5 minutes per software
 
     } catch (error) {
         console.error(`❌ Scheduled task failed: ${error.message}`);
