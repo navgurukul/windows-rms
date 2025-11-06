@@ -12,6 +12,21 @@ const { getSerialNumber } = require('./metricService');
 // installViaWingetTask()
 // ==========================
 
+async function isSoftwareInstalled(wingetId, softwareName) {
+    try {
+        const output = execSync(`winget list --id "${wingetId}"`, { encoding: "utf-8" });
+        if (output.includes(`${wingetId}`) || output.toLowerCase().includes(softwareName.toLowerCase())) {
+            return true;
+        }
+        if (output.includes("No installed package found matching input criteria.")) {
+            return false;
+        }
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
 async function installViaWingetTask(software_name, softwareId, length) {
     const tempDir = os.tmpdir();
     const scriptPath = path.join(tempDir, `${softwareId}-winget-install.ps1`);
@@ -146,10 +161,20 @@ const demoFunction = async () => {
 
             for (const software of notInstalled) {
                 const { software_name, winget_id } = software;
+                if (await isSoftwareInstalled(winget_id, software_name)) {
+                    console.log(`✅ ${software_name} is already installed.`);
+                    await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+                        serial_number: await getSerialNumber(),
+                        software_name: software_name,
+                        isSuccessful: true
+                    });
+                    console.log(`📘 History created for ${software_name}: true`);
+                    continue;
+                }
                 console.log(`🧩 Installing: ${software_name} (${winget_id})`);
                 await installViaWingetTask(software_name, winget_id, notInstalled.length);
             }
-        }, 2000);
+        }, 5000);
     } catch (error) {
         console.error('Error fetching or installing software in demoFunction:', error.message);
     }

@@ -85,6 +85,7 @@ function registerAsStartup() {
   //   console.error("Error registering startup entry:", err.message);
   // }
   try {
+    const exePath = process.execPath; // escape slashes
     // const exePath = process.execPath.replace(/\\/g, "\\\\"); // escape slashes
 
     const cmd = `SCHTASKS /Create /F /RL HIGHEST /SC ONLOGON /TN "SamaSystemAdmin" /TR "\\"${exePath}\\""`;
