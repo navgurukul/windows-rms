@@ -11,9 +11,14 @@ module.exports = {
   // BACKEND_SINGLE_URL: 'http://192.168.1.14:3000/api/tracking/sync',
 
   // SANDBOX API endpoints --RAILWAY
-  BACKEND_BASE_URL: 'https://windows-rms-server-production.up.railway.app',
-  BACKEND_BULK_URL: 'https://windows-rms-server-production.up.railway.app/api/tracking/bulk-sync',
-  BACKEND_SINGLE_URL: 'https://windows-rms-server-production.up.railway.app/api/tracking/sync',
+  // BACKEND_BASE_URL: 'https://windows-rms-server-production.up.railway.app',
+  // BACKEND_BULK_URL: 'https://windows-rms-server-production.up.railway.app/api/tracking/bulk-sync',
+  // BACKEND_SINGLE_URL: 'https://windows-rms-server-production.up.railway.app/api/tracking/sync',
+
+  // PROD API endpoints --SAMA LIVE
+  BACKEND_BASE_URL: 'https://rms-api.thesama.in',
+  BACKEND_BULK_URL: 'https://rms-api.thesama.in/api/tracking/bulk-sync',
+  BACKEND_SINGLE_URL: 'https://rms-api.thesama.in/api/tracking/sync',
 
   // BACKEND_BULK_URL: 'https://windows-socket.thesama.in/api/tracking/bulk-sync',
   // BACKEND_SINGLE_URL: 'https://windows-socket.thesama.in/api/tracking/sync',
