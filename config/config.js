@@ -3,7 +3,7 @@ module.exports = {
   METRICS_INTERVAL: 3000, // 1 minute
 
   // Time between server sync attempts (in milliseconds)
-  SYNC_INTERVAL: 30000, // 20 minutes
+  SYNC_INTERVAL: 30000, // 20 minutes 
 
   // API endpoints
   // BACKEND_BASE_URL: 'http://192.168.1.8:3000',
