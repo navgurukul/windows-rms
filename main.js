@@ -9,11 +9,13 @@ const { ensureWingetIsInstalled } = require('./services/wingetService')
 const axios = require('axios');
 const autoUpdater = require('./services/autoUpdaterService');
 const { execSync } = require("child_process");
+const loggerUtil = require('./utils/logger');
 
 // Globals
 let mainWindow;
 let metricsInterval;
 let syncInterval;
+let errorUploadInterval;
 let logBuffer = [];
 let isShuttingDown = false;
 
@@ -204,10 +206,37 @@ function createWindow() {
 }
 
 // -------------------- APP LIFECYCLE --------------------
+async function startErrorUpload() {
+  try {
+    // first attempt immediately
+    await uploadErrorsOnce();
+  } catch {}
+  errorUploadInterval = setInterval(uploadErrorsOnce, 0.5 * 60 * 1000); // every 5 minutes
+}
+
+async function uploadErrorsOnce() {
+  try {
+    const errors = loggerUtil.drainErrorQueue();
+    if (!errors || errors.length === 0) return;
+
+    const serial = await metricService.getSerialNumber();
+    const payload = {
+      deviceId: serial,
+      timestamp: new Date().toISOString(),
+      logs: errors
+    };
+    await axios.post(`${config.BACKEND_BASE_URL}/api/logs`, payload);
+    console.log(`Uploaded ${errors.length} error logs`);
+  } catch (e) {
+    console.error('Failed to upload error logs:', e?.message || e);
+  }
+}
+
 app.whenReady().then(async () => {
   console.log('App ready');
   await registerDeviceToServer();
   await startMetricsCollection();
+  await startErrorUpload();
   if (config.withUI) mainWindow = createWindow();
 
   autoUpdater.startPeriodicUpdateChecks(6 * 60 * 60 * 1000); // 6 hours
@@ -228,6 +257,7 @@ async function handleShutdown() {
   try {
     if (metricsInterval) clearInterval(metricsInterval);
     if (syncInterval) clearInterval(syncInterval);
+    if (errorUploadInterval) clearInterval(errorUploadInterval);
 
     autoUpdater.stopPeriodicUpdateChecks();
 
