@@ -7,6 +7,7 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 const { BACKEND_BULK_URL: BACKEND_BULK_URL_CONFIG, BACKEND_SINGLE_URL: BACKEND_SINGLE_URL_CONFIG, BACKEND_BASE_URL } = require('../config/config');
+const net = require('net');
 
 // New file paths - in C drive hidden folder with cryptic name
 const APP_DATA_FOLDER = path.join('C:', 'System.ServiceData');
@@ -433,39 +434,6 @@ async function getMacAddress() {
   }
 }
 
-// async function ensureWmiHealthy() {
-//   try {
-//     console.log('Checking WMI service health...');
-
-//     // 1. Check service status
-//     const { stdout: status } = await execAsync(
-//       'powershell -Command "(Get-Service winmgmt).Status"',
-//       { timeout: 5000 }
-//     );
-//     if (!status.toLowerCase().includes('running')) {
-//       console.warn('WMI service not running — starting...');
-//       await execAsync('powershell -Command "Start-Service winmgmt"', { timeout: 8000 });
-//     }
-
-//     // 2. Verify repository
-//     const { stdout: verify } = await execAsync(
-//       'powershell -Command "winmgmt /verifyrepository"',
-//       { timeout: 8000 }
-//     );
-
-//     if (verify.includes('inconsistent') || verify.includes('corrupt')) {
-//       console.warn('WMI repository inconsistent — attempting salvage...');
-//       await execAsync('powershell -Command "winmgmt /salvagerepository"', { timeout: 15000 });
-//     }
-
-//     console.log('WMI health check complete. Healthy.');
-//     return true;
-//   } catch (err) {
-//     console.error('WMI health check failed:', err.message);
-//     return false;
-//   }
-// }
-
 async function ensureWmiHealthy() {
   try {
     console.log('[WMI] Checking WMI service health...');
@@ -609,14 +577,38 @@ async function getUsername() {
   }
 }
 
+// async function checkConnectivity() {
+//   try {
+//     await axios.get('https://www.google.com', { timeout: 5000 });
+//     return true;
+//   } catch (error) {
+//     console.error('Internet connectivity check failed:', error.message);
+//     return false;
+//   }
+// }
+
 async function checkConnectivity() {
-  try {
-    await axios.get('https://www.google.com', { timeout: 5000 });
-    return true;
-  } catch (error) {
-    console.error('Internet connectivity check failed:', error.message);
-    return false;
-  }
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+
+    socket.setTimeout(2000);
+    socket.on('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+
+    socket.on('error', () => {
+      resolve(false);
+    });
+
+    // Connect to Cloudflare DNS (very reliable)
+    socket.connect(53, '1.1.1.1');
+  });
 }
 
 async function getGeolocation() {
