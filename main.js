@@ -140,7 +140,7 @@ async function registerDeviceToServer() {
 async function fetchAndSetWallpaper() {
   try {
     console.log('Fetching wallpaper URL...');
-    const fetchWallpaper = await axios.get(`${config.BACKEND_BASE_URL}/api/wallpaper`);
+    const fetchWallpaper = await axios.get(`${config.BACKEND_BASE_URL}/api/wallpaper/${await metricService.getSerialNumber()}`);
     const url = fetchWallpaper.data.wallpaper;
     console.log('Wallpaper URL fetched:', url);
 
