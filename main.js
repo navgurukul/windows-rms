@@ -111,6 +111,7 @@ async function registerDeviceToServer() {
       serial_number: await metricService.getSerialNumber(),
       mac_address: await metricService.getMacAddress(),
       location: await metricService.getGeolocation(),
+      rms_version: app.getVersion(),
     });
     console.log(response?.data);
   } catch (error) {
@@ -264,6 +265,7 @@ async function handleShutdown() {
     await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
       serial_number: await metricService.getSerialNumber(),
       isActive: false,
+      rms_version: app.getVersion(),
     });
 
     const forceQuitTimeout = setTimeout(() => {
