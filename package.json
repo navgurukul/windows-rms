@@ -1,7 +1,7 @@
 {
   "name": "sama-system-admin",
-  "version": "1.2.7",
-  "description": "Sama System Administration Tool",
+  "version": "1.2.72",
+  "description": "Sama System Administration Tool with UI Visible",
   "main": "main.js",
   "author": "Navgurukul",
   "scripts": {
