@@ -131,6 +131,7 @@ async function registerDeviceToServer() {
     // Check if Winget is installed
     const wingetInstalled = await ensureWingetIsInstalled();
     console.log(wingetInstalled);
+    await softwareInstallation.attemptWingetHardFix();  // attempt winget hard fix by removing msstore source and adding it again
 
   } catch (error) {
     console.error("Error syncing data to server:", error);

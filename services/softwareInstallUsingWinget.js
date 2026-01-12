@@ -27,21 +27,23 @@ async function isSoftwareInstalled(wingetId, softwareName) {
     }
 }
 
-async function installViaWingetTask(software_name, softwareId, length) {
+async function installViaWingetTask(software_name, softwareId, length, source) {
     const tempDir = os.tmpdir();
     const scriptPath = path.join(tempDir, `${softwareId}-winget-install.ps1`);
     const logPath = path.join(tempDir, `${softwareId}-winget-install.log`);
     const taskName = `WingetInstall_${softwareId}_${Date.now()}`;
     const startTime = getFutureTime(2);
+    const effectiveSource = source ? source : "winget";  // default fallback
 
     // Create PowerShell script (silent install with logging)
     const psContent = `
         Start-Transcript -Path "${logPath}" -Append
         try {
-            winget install --id ${softwareId} --silent --accept-source-agreements --accept-package-agreements --force --disable-interactivity --scope machine
+            winget install --id ${softwareId} --source ${effectiveSource} --silent --accept-source-agreements --accept-package-agreements --force --disable-interactivity --scope machine
         } catch {
             Write-Host "Error installing ${softwareId}: $($_.Exception.Message)"
         }
+        Write-Host "WingetExitCode=$LASTEXITCODE"
         Stop-Transcript
     `;
     fs.writeFileSync(scriptPath, psContent);
@@ -67,7 +69,7 @@ async function installViaWingetTask(software_name, softwareId, length) {
                 console.log(`Log Preview:\n${logText.slice(-1000)}`);
 
                 // Winget success detection
-                if (/Successfully installed/i.test(logText) || /installed successfully/i.test(logText)) {
+                if (/WingetExitCode=0/.test(logText) || /Successfully installed/i.test(logText) || /installed successfully/i.test(logText)) {
                     isSuccessful = true;
                     console.log(`✅ ${softwareId} installed successfully.`);
                 } else {
@@ -106,7 +108,7 @@ async function installViaWingetTask(software_name, softwareId, length) {
         try {
             await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
                 serial_number: await getSerialNumber(),
-                software_name: software_name,
+                software_name,
                 isSuccessful: false
             });
         } catch (err) {
@@ -142,6 +144,26 @@ schedule.schedule("0 5 * * *", async () => {
     scheduled: false,
     timezone: "Asia/Kolkata"
 });
+
+async function attemptWingetHardFix() {
+    console.log("🔧 Attempting Winget hard fix...");
+
+    try {
+        execSync(`powershell.exe -Command "winget source reset --force"`, { stdio: "ignore" });
+        console.log("✅ Winget source reset completed.");
+    } catch {
+        console.log("⚠️ Winget reset failed or not needed. Continuing normally...");
+    }
+
+    try {
+        execSync(`powershell.exe -Command "winget source add msstore"`, { stdio: "ignore" });
+        console.log("✅ Ensured msstore source exists.");
+    } catch {
+        console.log("⚠️ Could not add msstore source. Continuing...");
+    }
+
+    console.log("🚀 Startup continues normally.");
+}
 
 const demoFunction = async () => {
     try {
@@ -181,4 +203,4 @@ const demoFunction = async () => {
 }
 demoFunction();
 
-module.exports = { installViaWingetTask }
+module.exports = { installViaWingetTask, attemptWingetHardFix }

@@ -26,5 +26,5 @@ module.exports = {
   // JSON storage location
   JSON_FOLDER_NAME: 'SystemDataStorage',
   JSON_FILE_NAME: 'sysdata_repository.json',
-  withUI: true
+  withUI: false
 };
