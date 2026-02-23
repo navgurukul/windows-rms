@@ -13,6 +13,7 @@ const net = require('net');
 const APP_DATA_FOLDER = path.join('C:', 'System.ServiceData');
 const DAILY_JSON_FILE = path.join(APP_DATA_FOLDER, 'daily.json');
 const HISTORY_JSON_FILE = path.join(APP_DATA_FOLDER, 'history.json');
+const DEVICE_INFO_FILE = path.join(APP_DATA_FOLDER, 'device_info.json');
 
 // Backend API endpoints
 const BACKEND_BULK_URL = BACKEND_BULK_URL_CONFIG /*|| 'https://windows-socket.thesama.in/api/tracking/bulk-sync';*/
@@ -490,16 +491,27 @@ async function ensureWmiHealthy() {
 
 async function getSerialNumber() {
   try {
-    // First ensure WMI is working
+    // 1. Check for cached serial number first
+    try {
+      const infoData = await fs.readFile(DEVICE_INFO_FILE, 'utf8');
+      const info = JSON.parse(infoData);
+      if (info && info.serialNumber && info.serialNumber !== 'Unknown') {
+        return info.serialNumber;
+      }
+    } catch (e) {
+      // Ignore if file doesn't exist
+    }
+
+    // 2. Fallback to WMI if not cached
     await ensureWmiHealthy();
 
-    // Try multiple WMI classes
     const attempts = [
       'Get-WmiObject -Class Win32_BIOS | Select-Object -ExpandProperty SerialNumber',
       'Get-WmiObject -Class Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber',
       'Get-WmiObject -Class Win32_SystemEnclosure | Select-Object -ExpandProperty SerialNumber',
     ];
 
+    let detectedSerial = 'Unknown';
     for (const cmd of attempts) {
       try {
         const { stdout } = await execAsync(`powershell -command "${cmd}"`, { timeout: 5000 });
@@ -511,15 +523,29 @@ async function getSerialNumber() {
           serial !== 'Default string' &&
           serial.toLowerCase() !== 'none'
         ) {
-          return serial;
+          detectedSerial = serial;
+          break;
         }
       } catch (error) {
         console.log(`WMI query failed (${cmd.split('|')[0].trim()}):`, error.message);
       }
     }
 
-    console.warn('All WMI serial number queries failed — returning "Unknown".');
-    return 'Unknown';
+    // 3. Cache the detected serial (even if Unknown, we'll try again later)
+    if (detectedSerial !== 'Unknown') {
+      try {
+        await ensureDirectoryExists();
+        await fs.writeFile(DEVICE_INFO_FILE, JSON.stringify({
+          serialNumber: detectedSerial,
+          firstDetected: new Date().toISOString()
+        }, null, 2));
+        console.log(`Cached serial number: ${detectedSerial}`);
+      } catch (e) {
+        console.error('Failed to cache serial number:', e);
+      }
+    }
+
+    return detectedSerial;
   } catch (error) {
     console.error('Critical error in serial number detection:', error);
     return 'Unknown';
