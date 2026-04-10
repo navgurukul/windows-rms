@@ -165,6 +165,130 @@ async function attemptWingetHardFix() {
     console.log("🚀 Startup continues normally.");
 }
 
+async function installFromRmsRepository(software_name, filename, length, isPortable = false) {
+    const tempDir = os.tmpdir();
+    const installerPath = path.join(tempDir, filename);
+    const scriptPath = path.join(tempDir, `${software_name}-rms-install.ps1`);
+    const logPath = path.join(tempDir, `${software_name}-rms-install.log`);
+    const taskName = `RMSInstall_${software_name.replace(/\s+/g, '_')}_${Date.now()}`;
+    const startTime = getFutureTime(2);
+
+    try {
+        console.log(`Downloading ${software_name} from RMS repository...`);
+        const response = await axios({
+            method: 'get',
+            url: `${BACKEND_BASE_URL}/softwares/${encodeURIComponent(filename)}`,
+            responseType: 'stream'
+        });
+
+        const writer = fs.createWriteStream(installerPath);
+        response.data.pipe(writer);
+
+        await new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+
+        console.log(`✅ Downloaded ${filename} to ${installerPath}`);
+
+        // PowerShell script logic depending on whether it's runnable or installable
+        let psContent = '';
+        if (isPortable) {
+            // Portable: Move to a permanent location and create a shortcut
+            const destFolder = `C:\\Program Files\\${software_name.replace(/\\s+/g, '')}`;
+            psContent = `
+                Start-Transcript -Path "${logPath}" -Append
+                try {
+                    # Create directory if it doesn't exist
+                    if (!(Test-Path -Path "${destFolder}")) {
+                        New-Item -ItemType Directory -Force -Path "${destFolder}"
+                    }
+                    
+                    # Move the executable there
+                    $destPath = "${destFolder}\\${filename}"
+                    Move-Item -Path "${installerPath}" -Destination $destPath -Force
+                    
+                    # Create Desktop Shortcut
+                    $WshShell = New-Object -comObject WScript.Shell
+                    $Shortcut = $WshShell.CreateShortcut("$env:Public\\Desktop\\${software_name}.lnk")
+                    $Shortcut.TargetPath = $destPath
+                    $Shortcut.Save()
+                    
+                    Write-Host "Portable setup completed for ${software_name}"
+                    Write-Host "InstallExitCode=0"
+                } catch {
+                    Write-Host "Error setting up ${software_name}: $($_.Exception.Message)"
+                    Write-Host "InstallExitCode=1"
+                }
+                Stop-Transcript
+            `;
+        } else {
+            // Installer: Run silent install
+            psContent = `
+                Start-Transcript -Path "${logPath}" -Append
+                try {
+                    Start-Process -FilePath "${installerPath}" -ArgumentList "/S" -Wait
+                    Write-Host "Installation completed for ${software_name}"
+                } catch {
+                    Write-Host "Error installing ${software_name}: $($_.Exception.Message)"
+                }
+                Write-Host "InstallExitCode=$LASTEXITCODE"
+                Stop-Transcript
+            `;
+        }
+
+        fs.writeFileSync(scriptPath, psContent);
+
+        const escapedScriptPath = scriptPath.replace(/\\/g, "\\\\");
+        const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU "%USERNAME%" /F`;
+        execSync(taskCmd);
+        console.log(`✅ ${software_name} installation scheduled silently from RMS repository.`);
+
+        // Cleanup + history logic
+        setTimeout(async () => {
+            console.log(`\n🧹 Running cleanup for ${software_name} (RMS)...`);
+            let isSuccessful = false;
+
+            try {
+                const logText = fs.readFileSync(logPath, "utf8");
+                if (/InstallExitCode=0/.test(logText) || /Installation completed/i.test(logText)) {
+                    isSuccessful = true;
+                    console.log(`✅ ${software_name} installed successfully.`);
+                }
+            } catch {
+                console.log("⚠️ No log available.");
+            }
+
+            // Create backend history entry
+            try {
+                await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+                    serial_number: await getSerialNumber(),
+                    software_name: software_name,
+                    isSuccessful
+                });
+            } catch (err) {
+                console.error("Error creating history:", err.message);
+            }
+
+            // Cleanup temp + task
+            try { execSync(`schtasks /Delete /TN "${taskName}" /F`); } catch (err) { }
+            try { fs.unlinkSync(installerPath); } catch { }
+            try { fs.unlinkSync(scriptPath); } catch { }
+            try { fs.unlinkSync(logPath); } catch { }
+        }, 150000 * length);
+
+    } catch (error) {
+        console.error(`❌ RMS Repository installation failed: ${error.message}`);
+        try {
+            await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+                serial_number: await getSerialNumber(),
+                software_name: software_name,
+                isSuccessful: false
+            });
+        } catch (err) { }
+    }
+}
+
 const demoFunction = async () => {
     try {
         setTimeout(async () => {
@@ -182,19 +306,29 @@ const demoFunction = async () => {
             }
 
             for (const software of notInstalled) {
-                const { software_name, winget_id } = software;
-                if (await isSoftwareInstalled(winget_id, software_name)) {
-                    console.log(`✅ ${software_name} is already installed.`);
-                    await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
-                        serial_number: await getSerialNumber(),
-                        software_name: software_name,
-                        isSuccessful: true
-                    });
+                const { software_name, winget_id, source, isPortable } = software;
+
+                // For RMS repository, we don't check via winget list
+                if (source !== 'rms-repository') {
+                    if (await isSoftwareInstalled(winget_id, software_name)) {
+                        console.log(`✅ ${software_name} is already installed.`);
+                        await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+                            serial_number: await getSerialNumber(),
+                            software_name: software_name,
+                            isSuccessful: true
+                        });
                     console.log(`📘 History created for ${software_name}: true`);
-                    continue;
+                        continue;
+                    }
                 }
-                console.log(`🧩 Installing: ${software_name} (${winget_id})`);
-                await installViaWingetTask(software_name, winget_id, notInstalled.length);
+
+                console.log(`🧩 Installing: ${software_name} (${winget_id}) via ${source || 'winget'}`);
+
+                if (source === 'rms-repository') {
+                    await installFromRmsRepository(software_name, winget_id, notInstalled.length, isPortable);
+                } else {
+                    await installViaWingetTask(software_name, winget_id, notInstalled.length, source);
+                }
             }
         }, 5000);
     } catch (error) {
@@ -203,4 +337,4 @@ const demoFunction = async () => {
 }
 demoFunction();
 
-module.exports = { installViaWingetTask, attemptWingetHardFix }
+module.exports = { installViaWingetTask, attemptWingetHardFix, installFromRmsRepository }
