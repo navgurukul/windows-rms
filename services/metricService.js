@@ -4,6 +4,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
 const { exec } = require('child_process');
+const crypto = require('crypto');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 const { BACKEND_BULK_URL: BACKEND_BULK_URL_CONFIG, BACKEND_SINGLE_URL: BACKEND_SINGLE_URL_CONFIG, BACKEND_BASE_URL } = require('../config/config');
@@ -490,8 +491,20 @@ async function ensureWmiHealthy() {
 }
 
 async function getSerialNumber() {
+  const INVALID_SERIALS = new Set([
+    'to be filled by o.e.m.', 'default string', 'none', 'n/a',
+    'not specified', 'system serial number', '', 'unknown',
+    '0', '00000000', 'ffffffff'
+  ]);
+
+  function isValidSerial(s) {
+    if (!s) return false;
+    const lower = s.trim().toLowerCase();
+    return !INVALID_SERIALS.has(lower) && lower.length >= 4;
+  }
+
   try {
-    // 1. Check for cached serial number first
+    // 1. Return cached value if valid
     try {
       const infoData = await fs.readFile(DEVICE_INFO_FILE, 'utf8');
       const info = JSON.parse(infoData);
@@ -502,53 +515,145 @@ async function getSerialNumber() {
       // Ignore if file doesn't exist
     }
 
-    // 2. Fallback to WMI if not cached
+    let detectedSerial = null;
+
+    // 2. WMI via PowerShell (existing approach + CIM fallback)
     await ensureWmiHealthy();
 
-    const attempts = [
+    const wmiCmds = [
       'Get-WmiObject -Class Win32_BIOS | Select-Object -ExpandProperty SerialNumber',
       'Get-WmiObject -Class Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber',
       'Get-WmiObject -Class Win32_SystemEnclosure | Select-Object -ExpandProperty SerialNumber',
+      'Get-CimInstance -ClassName Win32_BIOS | Select-Object -ExpandProperty SerialNumber',
+      'Get-CimInstance -ClassName Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber',
     ];
 
-    let detectedSerial = 'Unknown';
-    for (const cmd of attempts) {
+    for (const cmd of wmiCmds) {
       try {
-        const { stdout } = await execAsync(`powershell -command "${cmd}"`, { timeout: 5000 });
-        const serial = stdout.trim();
-
-        if (
-          serial &&
-          serial !== 'To be filled by O.E.M.' &&
-          serial !== 'Default string' &&
-          serial.toLowerCase() !== 'none'
-        ) {
-          detectedSerial = serial;
+        const { stdout } = await execAsync(`powershell -command "${cmd}"`, { timeout: 6000 });
+        if (isValidSerial(stdout.trim())) {
+          detectedSerial = stdout.trim();
+          console.log(`[Serial] Found via WMI/CIM: ${detectedSerial}`);
           break;
         }
       } catch (error) {
-        console.log(`WMI query failed (${cmd.split('|')[0].trim()}):`, error.message);
+        console.log(`[Serial] WMI cmd failed (${cmd.split('|')[0].trim()}):`, error.message);
       }
     }
 
-    // 3. Cache the detected serial (even if Unknown, we'll try again later)
-    if (detectedSerial !== 'Unknown') {
+    // 3. WMIC CLI (different code path, often works when PS WMI fails)
+    if (!detectedSerial) {
       try {
-        await ensureDirectoryExists();
-        await fs.writeFile(DEVICE_INFO_FILE, JSON.stringify({
-          serialNumber: detectedSerial,
-          firstDetected: new Date().toISOString()
-        }, null, 2));
-        console.log(`Cached serial number: ${detectedSerial}`);
+        const { stdout } = await execAsync('wmic bios get serialnumber /value', { timeout: 6000 });
+        const match = stdout.match(/SerialNumber=(.+)/i);
+        if (match && isValidSerial(match[1].trim())) {
+          detectedSerial = match[1].trim();
+          console.log(`[Serial] Found via WMIC CLI: ${detectedSerial}`);
+        }
       } catch (e) {
-        console.error('Failed to cache serial number:', e);
+        console.log('[Serial] WMIC CLI failed:', e.message);
       }
+    }
+
+    // 4. Registry BIOS (kernel-populated, bypasses WMI entirely)
+    if (!detectedSerial) {
+      const regKeys = [
+        'HKLM\\HARDWARE\\DESCRIPTION\\System\\BIOS /v SystemSerialNumber',
+        'HKLM\\HARDWARE\\DESCRIPTION\\System\\BIOS /v BaseBoardSerialNumber',
+      ];
+      for (const regKey of regKeys) {
+        try {
+          const { stdout } = await execAsync(`reg query "${regKey}"`, { timeout: 5000 });
+          const match = stdout.match(/REG_SZ\s+(.+)/i);
+          if (match && isValidSerial(match[1].trim())) {
+            detectedSerial = match[1].trim();
+            console.log(`[Serial] Found via Registry: ${detectedSerial}`);
+            break;
+          }
+        } catch (e) {
+          console.log('[Serial] Registry query failed:', e.message);
+        }
+      }
+    }
+
+    // 5. Windows Product ID (tied to OS install, stable across reboots)
+    if (!detectedSerial) {
+      try {
+        const { stdout } = await execAsync(
+          'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" /v ProductId',
+          { timeout: 5000 }
+        );
+        const match = stdout.match(/ProductId\s+REG_SZ\s+(.+)/i);
+        if (match && isValidSerial(match[1].trim())) {
+          detectedSerial = `WIN-${match[1].trim()}`;
+          console.log(`[Serial] Found via Windows ProductId: ${detectedSerial}`);
+        }
+      } catch (e) {
+        console.log('[Serial] ProductId query failed:', e.message);
+      }
+    }
+
+    // 6. Hardware fingerprint: short hash of MAC + CPU + Disk IDs
+    if (!detectedSerial) {
+      try {
+        const parts = [];
+
+        const mac = await getMacAddress();
+        if (mac && mac !== 'Unknown') parts.push(mac);
+
+        try {
+          const { stdout } = await execAsync(
+            'powershell -command "Get-WmiObject -Class Win32_Processor | Select-Object -First 1 -ExpandProperty ProcessorId"',
+            { timeout: 5000 }
+          );
+          if (stdout.trim().length > 4) parts.push(stdout.trim());
+        } catch (e) {}
+
+        try {
+          const { stdout } = await execAsync('wmic diskdrive get serialnumber /value', { timeout: 5000 });
+          const diskMatch = stdout.match(/SerialNumber=(.+)/i);
+          if (diskMatch && diskMatch[1].trim().length > 4) parts.push(diskMatch[1].trim());
+        } catch (e) {}
+
+        if (parts.length >= 2) {
+          const hash = crypto.createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 8).toUpperCase();
+          detectedSerial = `FP-${hash}`;
+          console.log(`[Serial] Generated fingerprint (${parts.length} sources): ${detectedSerial}`);
+        }
+      } catch (e) {
+        console.log('[Serial] Hardware fingerprint failed:', e.message);
+      }
+    }
+
+    // 7. FINAL FALLBACK: Generate and persist a short UUID — NEVER return 'Unknown'
+    if (!detectedSerial) {
+      const uuid = crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
+      detectedSerial = `NG-${uuid}`;
+      console.warn(`[Serial] All hardware methods failed. Generated ID: ${detectedSerial}`);
+    }
+
+    // Cache the result (always — so it persists across reboots)
+    try {
+      await ensureDirectoryExists();
+      await fs.writeFile(DEVICE_INFO_FILE, JSON.stringify({
+        serialNumber: detectedSerial,
+        firstDetected: new Date().toISOString(),
+        method: detectedSerial.startsWith('FP-') ? 'fingerprint'
+              : detectedSerial.startsWith('WIN-') ? 'windows-product-id'
+              : detectedSerial.startsWith('NG-') ? 'generated-uuid'
+              : 'hardware'
+      }, null, 2));
+      console.log(`[Serial] Cached: ${detectedSerial}`);
+    } catch (e) {
+      console.error('[Serial] Failed to cache:', e);
     }
 
     return detectedSerial;
   } catch (error) {
-    console.error('Critical error in serial number detection:', error);
-    return 'Unknown';
+    console.error('[Serial] Critical error:', error);
+    // Even in catastrophic failure, return something unique
+    const fallback = crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
+    return `NG-${fallback}`;
   }
 }
 
