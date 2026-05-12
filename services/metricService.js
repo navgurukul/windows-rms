@@ -27,6 +27,11 @@ let totalActiveTime = 0; // Tracks values 1-5 for display in daily.json
 let lastSyncTime = 0;
 let backendTotalTime = 0; // Internal variable to track increments of 5 for the backend
 
+// Geolocation cache
+let cachedGeolocation = null;
+let geolocationCacheTime = 0;
+const GEOLOCATION_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
+
 // Make folder hidden in Windows
 async function makeDirectoryHidden() {
   try {
@@ -744,6 +749,12 @@ async function checkConnectivity() {
 
 async function getGeolocation() {
   try {
+    // Return cached value if valid
+    const now = Date.now();
+    if (cachedGeolocation && (now - geolocationCacheTime < GEOLOCATION_CACHE_TTL)) {
+      return cachedGeolocation;
+    }
+
     // Check internet connectivity
     const isConnected = await checkConnectivity();
     if (!isConnected) {
@@ -763,11 +774,14 @@ async function getGeolocation() {
         const [latitude, longitude] = response.data.loc.split(',').map(coord => parseFloat(coord));
         const locationName = `${response.data.city}, ${response.data.region}, ${response.data.country}`;
 
-        return {
+        cachedGeolocation = {
           latitude,
           longitude,
           location_name: locationName
         };
+        geolocationCacheTime = Date.now();
+
+        return cachedGeolocation;
       }
     } catch (ipinfoError) {
       console.error('IP geolocation failed:', ipinfoError.message);
@@ -777,11 +791,14 @@ async function getGeolocation() {
         const fallbackResponse = await axios.get('https://ipapi.co/json/');
 
         if (fallbackResponse.data && fallbackResponse.data.latitude) {
-          return {
+          cachedGeolocation = {
             latitude: fallbackResponse.data.latitude,
             longitude: fallbackResponse.data.longitude,
             location_name: `${fallbackResponse.data.city}, ${fallbackResponse.data.state}, ${fallbackResponse.data.country_name}`
           };
+          geolocationCacheTime = Date.now();
+
+          return cachedGeolocation;
         }
       } catch (fallbackError) {
         console.error('Fallback geolocation failed:', fallbackError.message);
@@ -796,7 +813,7 @@ async function getGeolocation() {
     };
 
   } catch (error) {
-    console.error('Critical error in geolocation function:', error);
+    console.error('Critical error in geolocation function:', error.message);
     return {
       latitude: null,
       longitude: null,

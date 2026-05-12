@@ -1,5 +1,12 @@
 require("./utils/logger");
 const { app, BrowserWindow } = require('electron');
+
+// -------------------- SINGLE INSTANCE LOCK --------------------
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+}
+
 const path = require('path');
 const config = require('./config/config');
 const metricService = require('./services/metricService');
@@ -212,8 +219,8 @@ async function startErrorUpload() {
   try {
     // first attempt immediately
     await uploadErrorsOnce();
-  } catch {}
-  errorUploadInterval = setInterval(uploadErrorsOnce, 0.5 * 60 * 1000); // every 5 minutes
+  } catch { }
+  errorUploadInterval = setInterval(uploadErrorsOnce, 6 * 60 * 60 * 1000); // every 6 hours
 }
 
 async function uploadErrorsOnce() {
