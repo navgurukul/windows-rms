@@ -9,14 +9,16 @@ if (!gotTheLock) {
 
 const path = require('path');
 const config = require('./config/config');
-const metricService = require('./services/metricService');
-const { setWallpaper } = require('./services/updateWallpaperWithVBS');
-const softwareInstallation = require('./services/softwareInstallUsingWinget');
-const { ensureWingetIsInstalled } = require('./services/wingetService')
 const axios = require('axios');
-const autoUpdater = require('./services/autoUpdaterService');
 const { execSync } = require("child_process");
 const loggerUtil = require('./utils/logger');
+
+// Deferred service variables
+let metricService;
+let setWallpaper;
+let softwareInstallation;
+let ensureWingetIsInstalled;
+let autoUpdater;
 
 // Globals
 let mainWindow;
@@ -111,39 +113,34 @@ function registerAsStartup() {
 
 // -------------------- STARTUP TASKS --------------------
 async function registerDeviceToServer() {
-  try {
-    console.log("Registering device to server");
-    const response = await axios.post(`${config.BACKEND_BASE_URL}/api/devices`, {
-      username: await metricService.getUsername(),
-      serial_number: await metricService.getSerialNumber(),
-      mac_address: await metricService.getMacAddress(),
-      location: await metricService.getGeolocation(),
-      rms_version: app.getVersion(),
-    });
-    console.log(response?.data);
-  } catch (error) {
-    console.error(error.response || 'Failed to register device');
+  if (!metricService) {
+    metricService = require('./services/metricService');
+  }
+  while (true) {
+    try {
+      console.log("Registering device to server...");
+      const response = await axios.post(`${config.BACKEND_BASE_URL}/api/devices`, {
+        username: await metricService.getUsername(),
+        serial_number: await metricService.getSerialNumber(),
+        mac_address: await metricService.getMacAddress(),
+        location: await metricService.getGeolocation(),
+        rms_version: app.getVersion(),
+      });
+      console.log("Device registered successfully:", response?.data);
+      if (response?.data?.serial_number) {
+        await metricService.updateCachedSerialNumber(response.data.serial_number);
+      }
+      break;
+    } catch (error) {
+      console.error("Failed to register device, retrying in 10 seconds...", {
+        code: error.code,
+        message: error.message,
+        url: error.config?.url,
+      });
+      await new Promise(resolve => setTimeout(resolve, 10000));
+    }
   }
 }
-
-(async () => {
-  try {
-    registerAsStartup();
-
-    // await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
-    //   serial_number: await metricService.getSerialNumber(),
-    //   isActive: true,
-    // });
-
-    // Check if Winget is installed
-    const wingetInstalled = await ensureWingetIsInstalled();
-    console.log(wingetInstalled);
-    await softwareInstallation.attemptWingetHardFix();  // attempt winget hard fix by removing msstore source and adding it again
-
-  } catch (error) {
-    console.error("Error syncing data to server:", error);
-  }
-})();
 
 // -------------------- WALLPAPER --------------------
 async function fetchAndSetWallpaper() {
@@ -243,7 +240,30 @@ async function uploadErrorsOnce() {
 
 app.whenReady().then(async () => {
   console.log('App ready');
+  
+  // 1. Block further execution until device is registered
   await registerDeviceToServer();
+
+  // 2. Load the remaining service modules
+  metricService = require('./services/metricService');
+  ({ setWallpaper } = require('./services/updateWallpaperWithVBS'));
+  softwareInstallation = require('./services/softwareInstallUsingWinget');
+  ({ ensureWingetIsInstalled } = require('./services/wingetService'));
+  autoUpdater = require('./services/autoUpdaterService');
+
+  // 3. Consolidate other startup tasks that were originally in the IIFE
+  try {
+    registerAsStartup();
+
+    // Check if Winget is installed
+    const wingetInstalled = await ensureWingetIsInstalled();
+    console.log("Winget installed status:", wingetInstalled);
+    await softwareInstallation.attemptWingetHardFix();
+  } catch (error) {
+    console.error("Error executing startup setup tasks:", error);
+  }
+
+  // 4. Start background services
   await startMetricsCollection();
   await startErrorUpload();
   if (config.withUI) mainWindow = createWindow();

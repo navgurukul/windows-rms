@@ -727,7 +727,7 @@ async function checkConnectivity() {
   return new Promise((resolve) => {
     const socket = new net.Socket();
 
-    socket.setTimeout(2000);
+    socket.setTimeout(5000);
     socket.on('connect', () => {
       socket.destroy();
       resolve(true);
@@ -896,11 +896,72 @@ async function sendFinalMetrics() {
   }
 }
 
+async function updateCachedSerialNumber(newSerial) {
+  try {
+    const currentSerial = await getSerialNumber();
+    if (currentSerial !== newSerial) {
+      console.log(`[Serial] Updating cached serial number from ${currentSerial} to ${newSerial}`);
+      await ensureDirectoryExists();
+      let info = {};
+      try {
+        const infoData = await fs.readFile(DEVICE_INFO_FILE, 'utf8');
+        info = JSON.parse(infoData);
+      } catch (e) {}
+      
+      info.serialNumber = newSerial;
+      info.lastUpdated = new Date().toISOString();
+      info.updateMethod = 'server-sync';
+      
+      await fs.writeFile(DEVICE_INFO_FILE, JSON.stringify(info, null, 2));
+
+      // Also update daily.json if it exists to ensure the sync uses the correct serial number
+      try {
+        await fs.access(DAILY_JSON_FILE);
+        const dailyDataStr = await fs.readFile(DAILY_JSON_FILE, 'utf8');
+        const dailyData = JSON.parse(dailyDataStr);
+        if (dailyData.serial_number !== newSerial) {
+          dailyData.serial_number = newSerial;
+          dailyData.last_updated = new Date().toISOString();
+          await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(dailyData, null, 2));
+          console.log('[Serial] Updated serial number in daily.json');
+        }
+      } catch (err) {
+        // daily.json might not exist yet, which is fine
+      }
+
+      // Also update history.json if it exists and contains records
+      try {
+        await fs.access(HISTORY_JSON_FILE);
+        const historyDataStr = await fs.readFile(HISTORY_JSON_FILE, 'utf8');
+        const historyData = JSON.parse(historyDataStr);
+        if (historyData.records && Array.isArray(historyData.records)) {
+          let updated = false;
+          for (const record of historyData.records) {
+            if (record.serial_number !== newSerial) {
+              record.serial_number = newSerial;
+              updated = true;
+            }
+          }
+          if (updated) {
+            await fs.writeFile(HISTORY_JSON_FILE, JSON.stringify(historyData, null, 2));
+            console.log('[Serial] Updated serial numbers in history.json');
+          }
+        }
+      } catch (err) {
+        // history.json might not exist yet, which is fine
+      }
+    }
+  } catch (error) {
+    console.error('[Serial] Failed to update cached serial number:', error);
+  }
+}
+
 module.exports = {
   initializeFiles,
   updateMetrics,
   syncData,
   sendFinalMetrics,
+  updateCachedSerialNumber,
   systemId,
   getSerialNumber,
   getMacAddress,
