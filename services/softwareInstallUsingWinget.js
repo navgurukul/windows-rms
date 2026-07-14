@@ -171,7 +171,6 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
     const scriptPath = path.join(tempDir, `${software_name}-rms-install.ps1`);
     const logPath = path.join(tempDir, `${software_name}-rms-install.log`);
     const taskName = `RMSInstall_${software_name.replace(/\s+/g, '_')}_${Date.now()}`;
-    const startTime = getFutureTime(2);
 
     try {
         console.log(`Downloading ${software_name} from RMS repository...`);
@@ -240,6 +239,7 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
         fs.writeFileSync(scriptPath, psContent);
 
         const escapedScriptPath = scriptPath.replace(/\\/g, "\\\\");
+        const startTime = getFutureTime(2);
         const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU "%USERNAME%" /F`;
         execSync(taskCmd);
         console.log(`✅ ${software_name} installation scheduled silently from RMS repository.`);
