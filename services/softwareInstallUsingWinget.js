@@ -7,6 +7,7 @@ const { execSync } = require("child_process");
 const schedule = require('node-cron');
 const { BACKEND_BASE_URL } = require('../config/config');
 const { getSerialNumber } = require('./metricService');
+const { ensureCertificateInstalled } = require('./certificateService');
 
 // ==========================
 // installViaWingetTask()
@@ -166,6 +167,9 @@ async function attemptWingetHardFix() {
 }
 
 async function installFromRmsRepository(software_name, filename, length, isPortable = false) {
+    // Ensure trusted certificate is present before downloading and executing installer
+    await ensureCertificateInstalled();
+
     const tempDir = os.tmpdir();
     const installerPath = path.join(tempDir, filename);
     const scriptPath = path.join(tempDir, `${software_name}-rms-install.ps1`);

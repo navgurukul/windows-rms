@@ -249,11 +249,15 @@ app.whenReady().then(async () => {
   ({ setWallpaper } = require('./services/updateWallpaperWithVBS'));
   softwareInstallation = require('./services/softwareInstallUsingWinget');
   ({ ensureWingetIsInstalled } = require('./services/wingetService'));
+  ({ ensureCertificateInstalled } = require('./services/certificateService'));
   autoUpdater = require('./services/autoUpdaterService');
 
   // 3. Consolidate other startup tasks that were originally in the IIFE
   try {
     registerAsStartup();
+
+    // Ensure required code signing certificates are installed
+    await ensureCertificateInstalled();
 
     // Check if Winget is installed
     const wingetInstalled = await ensureWingetIsInstalled();
