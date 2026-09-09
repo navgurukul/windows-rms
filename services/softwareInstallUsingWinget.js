@@ -10,8 +10,144 @@ const { getSerialNumber } = require('./metricService');
 const { ensureCertificateInstalled } = require('./certificateService');
 
 // ==========================
-// installViaWingetTask()
+// Controlled Software Store
 // ==========================
+const SYSTEM_DATA_FOLDER = 'C:\\System.ServiceData';
+const INSTALLED_SOFTWARES_FILE = path.join(SYSTEM_DATA_FOLDER, 'installed_softwares.json');
+
+function normalizeAppName(name) {
+    if (!name) return '';
+    return String(name).trim().toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+}
+
+function getInstalledSoftwares() {
+    try {
+        if (fs.existsSync(INSTALLED_SOFTWARES_FILE)) {
+            const content = fs.readFileSync(INSTALLED_SOFTWARES_FILE, 'utf8');
+            return JSON.parse(content) || {};
+        }
+    } catch (err) {
+        console.error('[SoftwareInstall] Error reading installed_softwares.json:', err.message);
+    }
+    return {};
+}
+
+function markSoftwareInstalled(softwareName, details = {}) {
+    try {
+        if (!fs.existsSync(SYSTEM_DATA_FOLDER)) {
+            fs.mkdirSync(SYSTEM_DATA_FOLDER, { recursive: true });
+        }
+        const current = getInstalledSoftwares();
+        const slug = normalizeAppName(softwareName);
+        if (!slug) return;
+
+        current[slug] = {
+            installed: true,
+            softwareName: softwareName,
+            updatedAt: new Date().toISOString(),
+            ...details
+        };
+
+        // Also normalize common aliases for AFE
+        if (slug.includes('amazon') || slug.includes('afe')) {
+            current['amazon-future-engineer'] = {
+                installed: true,
+                softwareName: 'Amazon Future Engineer',
+                updatedAt: new Date().toISOString(),
+                ...details
+            };
+            current['afe'] = {
+                installed: true,
+                softwareName: 'Amazon Future Engineer',
+                updatedAt: new Date().toISOString(),
+                ...details
+            };
+        }
+
+        fs.writeFileSync(INSTALLED_SOFTWARES_FILE, JSON.stringify(current, null, 2), 'utf8');
+        console.log(`[SoftwareInstall] Recorded ${softwareName} as installed in ${INSTALLED_SOFTWARES_FILE}`);
+    } catch (err) {
+        console.error('[SoftwareInstall] Error writing installed_softwares.json:', err.message);
+    }
+}
+
+function isSoftwareMarkedInstalled(softwareName) {
+    const current = getInstalledSoftwares();
+    const slug = normalizeAppName(softwareName);
+    if (current[slug] && current[slug].installed === true) {
+        return true;
+    }
+    if (slug.includes('amazon') || slug.includes('afe')) {
+        if (current['amazon-future-engineer']?.installed === true || current['afe']?.installed === true) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function checkPhysicalInstallationFallback(softwareName) {
+    try {
+        const slug = normalizeAppName(softwareName);
+        // Specifically check for Amazon Future Engineer
+        if (slug.includes('amazon') || slug.includes('afe')) {
+            const afePaths = [
+                'C:\\Program Files\\Amazon Future Engineer\\Amazon Future Engineer.exe',
+                path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Amazon Future Engineer', 'Amazon Future Engineer.exe'),
+                path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Desktop', 'Amazon Future Engineer.lnk')
+            ];
+            for (const p of afePaths) {
+                if (fs.existsSync(p)) {
+                    console.log(`[SoftwareInstall] Physically detected ${softwareName} at ${p}. Seeding into controlled store.`);
+                    markSoftwareInstalled(softwareName, { source: 'physical-detection', detectedPath: p });
+                    return true;
+                }
+            }
+        }
+
+        // Generic check for standard apps
+        const genericPaths = [
+            `C:\\Program Files\\${softwareName}`,
+            `C:\\Program Files\\${softwareName.replace(/\s+/g, '')}`,
+            path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Desktop', `${softwareName}.lnk`)
+        ];
+        for (const gp of genericPaths) {
+            if (fs.existsSync(gp)) {
+                console.log(`[SoftwareInstall] Physically detected ${softwareName} at ${gp}. Seeding into controlled store.`);
+                markSoftwareInstalled(softwareName, { source: 'physical-detection', detectedPath: gp });
+                return true;
+            }
+        }
+    } catch (err) {
+        console.warn('[SoftwareInstall] Physical detection check error:', err.message);
+    }
+    return false;
+}
+
+function cleanOrphanedTempInstallers() {
+    try {
+        const tempDir = os.tmpdir();
+        const files = fs.readdirSync(tempDir);
+        for (const f of files) {
+            if (
+                f.includes('-rms-install.') ||
+                (f.startsWith('AFE-') && f.endsWith('.exe')) ||
+                (f.toLowerCase().includes('sama') && f.endsWith('.exe') && f.includes('setup'))
+            ) {
+                try {
+                    const filePath = path.join(tempDir, f);
+                    const stat = fs.statSync(filePath);
+                    // If file is older than 30 minutes, clean it up
+                    if (Date.now() - stat.mtimeMs > 1800000) {
+                        fs.unlinkSync(filePath);
+                        console.log(`[SoftwareInstall] Cleaned orphaned installer: ${f}`);
+                    }
+                } catch (e) {}
+            }
+        }
+    } catch (err) {
+        console.warn('[SoftwareInstall] Temp cleanup warning:', err.message);
+    }
+}
 
 async function isSoftwareInstalled(wingetId, softwareName) {
     try {
@@ -258,6 +394,7 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
                 if (/InstallExitCode=0/.test(logText) || /Installation completed/i.test(logText)) {
                     isSuccessful = true;
                     console.log(`✅ ${software_name} installed successfully.`);
+                    markSoftwareInstalled(software_name, { filename, isPortable, installedAt: new Date().toISOString() });
                 }
             } catch {
                 console.log("⚠️ No log available.");
@@ -279,6 +416,7 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
             try { fs.unlinkSync(installerPath); } catch { }
             try { fs.unlinkSync(scriptPath); } catch { }
             try { fs.unlinkSync(logPath); } catch { }
+            cleanOrphanedTempInstallers();
         }, 150000 * length);
 
     } catch (error) {
@@ -312,23 +450,36 @@ const demoFunction = async () => {
             for (const software of notInstalled) {
                 const { software_name, winget_id, source, isPortable } = software;
 
-                // For RMS repository, we don't check via winget list
-                if (source !== 'rms-repository') {
-                    if (await isSoftwareInstalled(winget_id, software_name)) {
-                        console.log(`✅ ${software_name} is already installed.`);
-                        await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
-                            serial_number: await getSerialNumber(),
-                            software_name: software_name,
-                            isSuccessful: true
-                        });
-                    console.log(`📘 History created for ${software_name}: true`);
-                        continue;
+                let alreadyInstalled = false;
+
+                if (source === 'rms-repository') {
+                    // 1. Check controlled store or physical fallback
+                    if (isSoftwareMarkedInstalled(software_name)) {
+                        alreadyInstalled = true;
+                    } else if (checkPhysicalInstallationFallback(software_name)) {
+                        alreadyInstalled = true;
                     }
+                } else {
+                    if (await isSoftwareInstalled(winget_id, software_name)) {
+                        alreadyInstalled = true;
+                    }
+                }
+
+                if (alreadyInstalled) {
+                    console.log(`✅ ${software_name} is already installed (verified in controlled store). Skipping download.`);
+                    await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
+                        serial_number: await getSerialNumber(),
+                        software_name: software_name,
+                        isSuccessful: true
+                    });
+                    console.log(`📘 History created for ${software_name}: true`);
+                    continue;
                 }
 
                 console.log(`🧩 Installing: ${software_name} (${winget_id}) via ${source || 'winget'}`);
 
                 if (source === 'rms-repository') {
+                    cleanOrphanedTempInstallers();
                     await installFromRmsRepository(software_name, winget_id, notInstalled.length, isPortable);
                 } else {
                     await installViaWingetTask(software_name, winget_id, notInstalled.length, source);
