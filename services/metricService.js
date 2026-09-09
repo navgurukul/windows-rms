@@ -342,6 +342,38 @@ async function syncData() {
   }
 }
 
+// Helper to verify device registration on server, with automatic MAC-address self-healing if serial was updated
+async function verifyOrSelfHealDeviceRegistration(currentSerial) {
+  let serialToUse = currentSerial;
+  try {
+    const deviceExists = await axios.get(`${BACKEND_BASE_URL}/api/devices/serial/${encodeURIComponent(serialToUse)}`);
+    if (deviceExists.status === 200) {
+      return { registered: true, serialNumber: serialToUse };
+    }
+  } catch (err) {
+    if (err.response?.status === 404) {
+      console.warn(`[RMS] Serial ${serialToUse} not found on server (404). Attempting self-healing via MAC address...`);
+      try {
+        const mac = await getMacAddress();
+        if (mac && mac !== 'Unknown') {
+          const macRes = await axios.get(`${BACKEND_BASE_URL}/api/devices/mac/${encodeURIComponent(mac)}`);
+          if (macRes.status === 200 && macRes.data?.serial_number) {
+            const updatedSerial = macRes.data.serial_number;
+            console.log(`[RMS] Self-healing succeeded: Server has updated serial: ${updatedSerial}`);
+            await updateCachedSerialNumber(updatedSerial);
+            return { registered: true, serialNumber: updatedSerial };
+          }
+        }
+      } catch (macErr) {
+        console.warn('[RMS] MAC address self-healing check failed:', macErr.message);
+      }
+    } else {
+      console.warn('[RMS] Error checking device registration:', err.message);
+    }
+  }
+  return { registered: false, serialNumber: serialToUse };
+}
+
 // Sync single day's data
 async function syncSingleData() {
   try {
@@ -363,14 +395,18 @@ async function syncSingleData() {
       last_updated: new Date().toISOString()
     };
 
-    // Delay for 2 seconds before sending to single API so that device is registered
-    const deviceExists = await axios.get(`${BACKEND_BASE_URL}/api/devices/serial/${dailyData.serial_number}`);
-    if (deviceExists.status === 200) {
-      console.log('Device is registered, sending data');
-    } else {
+    // Verify device registration with self-healing fallback to MAC
+    const registration = await verifyOrSelfHealDeviceRegistration(dailyData.serial_number);
+    if (!registration.registered) {
       console.log('Device is not registered, skipping data');
       return false;
     }
+    if (registration.serialNumber !== dailyData.serial_number) {
+      dailyData.serial_number = registration.serialNumber;
+      syncPayload.serial_number = registration.serialNumber;
+    }
+    console.log('Device is registered, sending data');
+
     await new Promise(resolve => setTimeout(resolve, 2000));
     const response = await axios.post(BACKEND_SINGLE_URL, syncPayload);
 
@@ -396,14 +432,20 @@ async function syncBulkData(historyData) {
       records: historyData.records
     };
 
-    // Delay for 2 seconds before sending to bulk API so that device is registered
-    const deviceExists = await axios.get(`${BACKEND_BASE_URL}/api/devices/serial/${await getSerialNumber()}`);
-    if (deviceExists.status === 200) {
-      console.log('Device is registered, sending data');
-    } else {
+    // Verify device registration with self-healing fallback to MAC
+    const currentSerial = await getSerialNumber();
+    const registration = await verifyOrSelfHealDeviceRegistration(currentSerial);
+    if (!registration.registered) {
       console.log('Device is not registered, skipping data');
       return false;
     }
+    if (registration.serialNumber !== currentSerial) {
+      for (const rec of payload.records) {
+        rec.serial_number = registration.serialNumber;
+      }
+    }
+    console.log('Device is registered, sending data');
+
     const response = await axios.post(BACKEND_BULK_URL, payload);
 
     if (response.status === 200) {
@@ -513,11 +555,38 @@ async function getSerialNumber() {
     try {
       const infoData = await fs.readFile(DEVICE_INFO_FILE, 'utf8');
       const info = JSON.parse(infoData);
-      if (info && info.serialNumber && info.serialNumber !== 'Unknown') {
+      if (info && info.serialNumber && info.serialNumber !== 'Unknown' && isValidSerial(info.serialNumber)) {
         return info.serialNumber;
       }
     } catch (e) {
       // Ignore if file doesn't exist
+    }
+
+    // 1b. Check if AFE config exists (mutual reconciliation when AFE was installed first)
+    try {
+      const afeConfigPath = path.join(process.env.APPDATA || '', 'OfflineLearningApp', 'config.json');
+      const afeDevConfigPath = path.join(process.cwd(), '..', 'AFE', 'apps', 'dev-data', 'config.json');
+      let targetAfePath = null;
+      try {
+        await fs.access(afeConfigPath);
+        targetAfePath = afeConfigPath;
+      } catch (_) {
+        try {
+          await fs.access(afeDevConfigPath);
+          targetAfePath = afeDevConfigPath;
+        } catch (_) {}
+      }
+
+      if (targetAfePath) {
+        const afeData = await fs.readFile(targetAfePath, 'utf8');
+        const afeConfig = JSON.parse(afeData);
+        if (afeConfig && afeConfig.customSerialNumber && isValidSerial(afeConfig.customSerialNumber)) {
+          console.log(`[Serial] Found verified serial from AFE config: ${afeConfig.customSerialNumber}`);
+          return afeConfig.customSerialNumber;
+        }
+      }
+    } catch (afeErr) {
+      // Ignore
     }
 
     let detectedSerial = null;
