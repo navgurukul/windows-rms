@@ -1031,6 +1031,7 @@ module.exports = {
   syncData,
   sendFinalMetrics,
   updateCachedSerialNumber,
+  verifyOrSelfHealDeviceRegistration,
   systemId,
   getSerialNumber,
   getMacAddress,

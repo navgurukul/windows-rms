@@ -1,6 +1,43 @@
-# Release Notes - Sama System Admin (v1.2.11 - v1.2.13)
+# Release Notes - Sama System Admin
 
-This release introduces critical enhancements to device registration robustness, internet connectivity resilience, storage optimization, and deployment stability.
+## Release Notes: v1.3.0 (Controlled Software Store, Redundant Download Prevention, MAC-Based Serial Self-Healing & Mutual AFE Reconciliation) - September 9, 2026
+
+This release introduces critical enhancements to network bandwidth conservation, disk storage optimization, and resilient identity self-healing across remote offline laptop fleets.
+
+### 🛠️ Key Improvements & New Features
+
+#### 1. Authoritative Controlled Software Store (`installed_softwares.json`)
+* **Dedicated Status Manifest:** Introduced `C:\System.ServiceData\installed_softwares.json`, an authoritative local database tracking applications deployed through RMS or co-located educational software.
+* **Normalized Key Matching (`normalizeAppName`):** Implemented strict normalization converting arbitrary software name formats (e.g., `"Amazon Future Engineer"`, `"amazon_future_engineer"`, `"afe"`) into standardized hyphenated slugs (`"amazon-future-engineer"`), eliminating casing and formatting mismatches.
+* **Multi-Alias Registration:** Built-in alias support ensures dual registration for critical apps such as Amazon Future Engineer (`amazon-future-engineer` and `afe`).
+
+#### 2. Redundant 1.3 GB Download Prevention (`demoFunction` & `installFromRmsRepository`)
+* **Pre-Download Installation Verification:** Before downloading any software package hosted on `rms-repository`, RMS performs a multi-step check:
+  1. Inspects `installed_softwares.json` for verified prior installation records.
+  2. Executes `checkPhysicalInstallationFallback()` across standard Windows installation targets (`Program Files`, `%LOCALAPPDATA%\Programs`, and Desktop `.lnk` shortcuts).
+* **Immediate Server Confirmation:** If the application is verified as installed, RMS logs the status, immediately notifies the server via `/api/softwares/addHistory` (`{ isSuccessful: true, reason: 'already_installed' }`), and **completely aborts the multi-gigabyte installer download**.
+* **Bandwidth & Quota Protection:** Prevents critical school cellular data exhaustion and bandwidth choking across fleets of hundreds of laptops.
+
+#### 3. Automated Orphaned Temp Installer Garbage Collection
+* **Temp File Purging (`cleanOrphanedTempInstallers`):** Routine scanner targeting installer artifacts in `os.tmpdir()` (`AppData\Local\Temp`).
+* **Stale Installer Detection:** Identifies installer executables matching `RMS_Installer_*` or `Amazon-Future-Engineer-*` older than 30 minutes.
+* **Disk Space Reclamation:** Executes automatically prior to download routines and after package installation, preventing laptop hard drives from filling up with gigabytes of orphaned setup binaries.
+
+#### 4. MAC-Based Serial Number Self-Healing (`verifyOrSelfHealDeviceRegistration`)
+* **Resilient Registration Verification:** Replaced brittle single-endpoint serial checks with an adaptive verification workflow:
+  1. Polls `GET /api/devices/serial/:serial`.
+  2. If the server responds with **404 Not Found**, RMS automatically invokes `GET /api/devices/mac/:mac` using the physical network interface address.
+  3. If found via MAC, RMS dynamically adopts the server's registered serial number via `updateCachedSerialNumber()`, immediately reconciling `device_info.json`, `daily.json`, and `history.json`.
+* **Zero Disconnected Laptops:** Guarantees that laptops never remain in a disconnected 404 state after manual admin adjustments or AFE-driven serial corrections.
+
+#### 5. Mutual AFE Serial Number Cross-Check in `getSerialNumber()`
+* **AFE-First Installation Support:** Added Step 1b in the client's serial resolution cascade.
+* **Direct Local Config Probe:** RMS safely inspects `%APPDATA%\OfflineLearningApp\config.json` for `customSerialNumber`.
+* **Consistent Machine Identity:** Ensures that if school coordinators onboard a laptop through AFE before RMS is deployed, RMS immediately recognizes and adopts the coordinator-verified serial number rather than falling back to generic hardware identifiers.
+
+---
+
+## Release Notes: v1.2.11 - v1.2.13
 
 ---
 
@@ -29,5 +66,6 @@ This release introduces critical enhancements to device registration robustness,
 
 ## 📦 Version History
 
+* **v1.3.0**: Major update introducing the authoritative controlled software store, redundant 1.3GB download avoidance, automated temp installer garbage collection, MAC-based serial self-healing, and mutual AFE serial reconciliation.
 * **v1.2.13**: Minor package upgrades, updated build configurations, and validation check alignment.
 * **v1.2.11**: Major stability update introducing single-instance locking, server-serial sync caching, and indefinite registration retries.

@@ -492,4 +492,16 @@ const demoFunction = async () => {
 }
 demoFunction();
 
-module.exports = { installViaWingetTask, attemptWingetHardFix, installFromRmsRepository }
+module.exports = {
+    installViaWingetTask,
+    attemptWingetHardFix,
+    installFromRmsRepository,
+    normalizeAppName,
+    getInstalledSoftwares,
+    markSoftwareInstalled,
+    isSoftwareMarkedInstalled,
+    checkPhysicalInstallationFallback,
+    cleanOrphanedTempInstallers,
+    INSTALLED_SOFTWARES_FILE,
+    SYSTEM_DATA_FOLDER
+};
