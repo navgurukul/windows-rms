@@ -1,10 +1,44 @@
 # Release Notes - Sama System Admin
 
+## Release Notes: v1.4.0 (Remote Script-Based Software Deployment for Time Watch / Active Watch & Build Hygiene) - October 12, 2026
+
+This release introduces native remote script installation capabilities via Windows Scheduled Tasks, enabling seamless, elevated silent deployment for custom utilities and monitoring agents like Time Watch (Active Watch) alongside enhanced repository build hygiene.
+
+### Key Improvements & New Features
+
+#### 1. Remote Script Installation via Scheduled Tasks (`installScriptFileViaTask`)
+* **Multi-Format Script Execution:** Added support for executing remote deployment scripts in `.bat`, `.cmd`, `.ps1`, and `.sh` formats, bypassing Winget and traditional MSI/EXE package limitations.
+* **Interpreter Resolution:** Automatically selects the appropriate execution engine based on file extension:
+  * PowerShell scripts (`.ps1`) run with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <scriptPath>`.
+  * Shell scripts (`.sh`) execute through `bash <scriptPath>`.
+  * Batch files (`.cmd`, `.bat`) run silently through `cmd.exe /c <scriptPath>`.
+* **Elevated Hidden Execution (`schtasks`):** Creates a dedicated, elevated Windows scheduled task (`/RL HIGHEST /RU "%USERNAME%" /F`) running in hidden window style (`-WindowStyle Hidden`), scheduled 2 minutes in advance to guarantee execution without interrupting end users.
+
+#### 2. Time Watch / Active Watch Silent Deployment Support
+* **Targeted Agent Deployment:** Specifically tailored for background monitoring agents, time tracking tools (such as Time Watch / Active Watch), and bespoke school administration scripts that require custom download-and-run workflows.
+* **Dynamic Script Detection (`getScriptInfo`):** Automatically detects whether software payloads configured in RMS are script files via `file_url`, `script_url`, `url`, or URL-based `winget_id` fields matching `.(bat|cmd|sh|ps1)`.
+* **Integrated Queue Processing:** Seamlessly routes script-based software through the main installation pipeline (`demoFunction`) alongside existing Winget packages and RMS repository binaries.
+
+#### 3. Execution Telemetry & Transcript Logging
+* **Full Transcript Capture:** Encloses PowerShell execution in `Start-Transcript` and `Stop-Transcript` logging to `<safeName>-script-install.log` within the system temporary directory.
+* **Exit Code & Status Validation:** Evaluates `$LASTEXITCODE` to confirm successful execution (`SCRIPT_INSTALL_SUCCESS`), with detailed console previews for debugging.
+* **Backend History Synchronization:** Reports installation status (`isSuccessful`) directly to the RMS server via `POST /api/softwares/addHistory` with device serial number tracking.
+
+#### 4. Automated Task & Artifact Lifecycle Management
+* **Self-Cleaning Ephemeral Files:** Automatically purges downloaded script binaries, PowerShell runners, and log files in a `finally` block and timed cleanup handler.
+* **Scheduled Task Purging:** Automatically deletes completed scheduled tasks from Windows Task Scheduler (`schtasks /Delete /TN <taskName> /F`) after execution verification, leaving zero residual system clutter.
+
+#### 5. Repository & Workspace Hygiene
+* **Data Directory Protection:** Updated `.gitignore` to comprehensively ignore local `data/` directories and internal artifacts.
+* **OS Metadata Filtering:** Added rules to filter out macOS `.DS_Store` metadata files from git tracking.
+
+---
+
 ## Release Notes: v1.3.0 (Controlled Software Store, Redundant Download Prevention, MAC-Based Serial Self-Healing & Mutual AFE Reconciliation) - September 9, 2026
 
 This release introduces critical enhancements to network bandwidth conservation, disk storage optimization, and resilient identity self-healing across remote offline laptop fleets.
 
-### 🛠️ Key Improvements & New Features
+### Key Improvements & New Features
 
 #### 1. Authoritative Controlled Software Store (`installed_softwares.json`)
 * **Dedicated Status Manifest:** Introduced `C:\System.ServiceData\installed_softwares.json`, an authoritative local database tracking applications deployed through RMS or co-located educational software.
@@ -41,12 +75,12 @@ This release introduces critical enhancements to network bandwidth conservation,
 
 ---
 
-## 🛠️ Key Improvements & New Features
+## Key Improvements & New Features
 
 ### 1. Robust Device Registration & Identity Synchronization
 * **Server-Client Serial Sync**: The client now dynamically updates its local files (`device_info.json`, `daily.json`, and `history.json`) to match the primary serial number registered in the backend database. This eliminates `404 Not Found` sync errors and ensures laptops display correctly on the RMS dashboard.
 * **Smart Serial Upgrading**: On registration, if the database has a fallback serial number (e.g. `WIN-...`, `FP-...`, or `NG-...`) for a device but the client successfully retrieves a hardware serial number, the database is automatically upgraded to the true hardware serial number.
-* **Resilient Serial Detection Chain**: Employs a multi-layered detection fallback chain (WMI ➡️ CIM ➡️ WMIC CLI ➡️ Registry ➡️ Windows Product ID ➡️ Hardware Fingerprint ➡️ Generated UUID) to ensure a unique, persistent identifier is always generated.
+* **Resilient Serial Detection Chain**: Employs a multi-layered detection fallback chain (WMI -> CIM -> WMIC CLI -> Registry -> Windows Product ID -> Hardware Fingerprint -> Generated UUID) to ensure a unique, persistent identifier is always generated.
 
 ### 2. Network & Startup Resilience
 * **Startup Blocking & Retry**: The client now blocks initialization steps on startup until a device registration query successfully connects to the server, preventing initialization failure when DNS resolution is slow.
@@ -64,8 +98,9 @@ This release introduces critical enhancements to network bandwidth conservation,
 
 ---
 
-## 📦 Version History
+## Version History
 
+* **v1.4.0**: Added remote script-based installation via scheduled tasks (.bat, .cmd, .ps1, .sh) to support silent deployment for Time Watch / Active Watch, automatic execution transcript logging, telemetry reporting, and enhanced build hygiene.
 * **v1.3.0**: Major update introducing the authoritative controlled software store, redundant 1.3GB download avoidance, automated temp installer garbage collection, MAC-based serial self-healing, and mutual AFE serial reconciliation.
 * **v1.2.13**: Minor package upgrades, updated build configurations, and validation check alignment.
 * **v1.2.11**: Major stability update introducing single-instance locking, server-serial sync caching, and indefinite registration retries.
