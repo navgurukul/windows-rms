@@ -11,4 +11,8 @@ node_modules/
 logs/
 utils/logs/
 
+# Ignore data folder and its content
 data/
+
+# Ignore macOS metadata files
+.DS_Store
