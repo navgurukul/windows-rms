@@ -104,6 +104,28 @@ function checkPhysicalInstallationFallback(softwareName) {
             }
         }
 
+        // Specifically check for AI Tutor
+        if (slug.includes('aitutor') || slug.includes('ai-tutor')) {
+            const aiTutorPaths = [
+                'C:\\Program Files\\AITutor-Test\\python\\python.exe',
+                'C:\\Program Files\\AITutor\\python\\python.exe',
+                path.join(process.env.LOCALAPPDATA || '', 'Programs', 'AITutor-Test', 'python', 'python.exe'),
+                path.join(process.env.LOCALAPPDATA || '', 'Programs', 'AITutor', 'python', 'python.exe'),
+                path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Desktop', 'AI Tutor (test build).lnk'),
+                path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Desktop', 'AI Tutor.lnk'),
+                path.join(os.homedir(), 'Desktop', 'AI Tutor (test build).lnk'),
+                path.join(os.homedir(), 'OneDrive', 'Desktop', 'AI Tutor (test build).lnk')
+            ];
+            for (const p of aiTutorPaths) {
+                if (fs.existsSync(p)) {
+                    console.log(`[SoftwareInstall] Physically detected ${softwareName} at ${p}. Seeding into controlled store.`);
+                    markSoftwareInstalled(softwareName, { source: 'physical-detection', detectedPath: p });
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // Generic check for standard apps
         const genericPaths = [
             `C:\\Program Files\\${softwareName}`,
@@ -131,7 +153,8 @@ function cleanOrphanedTempInstallers() {
             if (
                 f.includes('-rms-install.') ||
                 (f.startsWith('AFE-') && f.endsWith('.exe')) ||
-                (f.toLowerCase().includes('sama') && f.endsWith('.exe') && f.includes('setup'))
+                (f.toLowerCase().includes('sama') && f.endsWith('.exe') && f.includes('setup')) ||
+                (f.toLowerCase().includes('aitutor') && f.endsWith('.exe'))
             ) {
                 try {
                     const filePath = path.join(tempDir, f);
@@ -446,7 +469,7 @@ async function attemptWingetHardFix() {
     console.log("🚀 Startup continues normally.");
 }
 
-async function installFromRmsRepository(software_name, filename, length, isPortable = false) {
+async function installFromRmsRepository(software_name, filename, length = 1, isPortable = false, customArgs = null) {
     // Ensure trusted certificate is present before downloading and executing installer
     await ensureCertificateInstalled();
 
@@ -457,7 +480,7 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
     const taskName = `RMSInstall_${software_name.replace(/\s+/g, '_')}_${Date.now()}`;
 
     try {
-        console.log(`Downloading ${software_name} from RMS repository...`);
+        console.log(`[SoftwareInstall] Downloading ${software_name} from RMS repository...`);
         const response = await axios({
             method: 'get',
             url: `${BACKEND_BASE_URL}/softwares/${encodeURIComponent(filename)}`,
@@ -472,7 +495,7 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
             writer.on('error', reject);
         });
 
-        console.log(`✅ Downloaded ${filename} to ${installerPath}`);
+        console.log(`[SoftwareInstall] [SUCCESS] Downloaded ${filename} to ${installerPath}`);
 
         // PowerShell script logic depending on whether it's runnable or installable
         let psContent = '';
@@ -507,15 +530,27 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
             `;
         } else {
             // Installer: Run silent install
+            const safeName = software_name.replace(/[^a-zA-Z0-9]/g, '_');
+            const setupLogPath = path.join(tempDir, `${safeName}_setup_detail.log`);
+            const isInnoSetup = software_name.toLowerCase().includes('aitutor') ||
+                                software_name.toLowerCase().includes('ai-tutor') ||
+                                software_name.toLowerCase().includes('ai tutor') ||
+                                filename.toLowerCase().includes('aitutor') ||
+                                filename.toLowerCase().includes('inno');
+            const argListCode = customArgs 
+                ? `'${customArgs}'` 
+                : (isInnoSetup ? `@('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/LOG=${setupLogPath}')` : `'${silentArgs}'`);
+
             psContent = `
                 Start-Transcript -Path "${logPath}" -Append
                 try {
-                    Start-Process -FilePath "${installerPath}" -ArgumentList "/S" -Wait
+                    $proc = Start-Process -FilePath "${installerPath}" -ArgumentList ${argListCode} -Wait -PassThru
                     Write-Host "Installation completed for ${software_name}"
+                    Write-Host "InstallExitCode=$($proc.ExitCode)"
                 } catch {
                     Write-Host "Error installing ${software_name}: $($_.Exception.Message)"
+                    Write-Host "InstallExitCode=1"
                 }
-                Write-Host "InstallExitCode=$LASTEXITCODE"
                 Stop-Transcript
             `;
         }
@@ -526,22 +561,27 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
         const startTime = getFutureTime(2);
         const taskCmd = `schtasks /Create /TN "${taskName}" /TR "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"${escapedScriptPath}\\"" /SC ONCE /ST ${startTime} /RL HIGHEST /RU "%USERNAME%" /F`;
         execSync(taskCmd);
-        console.log(`✅ ${software_name} installation scheduled silently from RMS repository.`);
+        try {
+            execSync(`schtasks /Run /TN "${taskName}"`);
+        } catch (runErr) {
+            console.log(`[SoftwareInstall] Task scheduled for ${startTime}, run trigger notice: ${runErr.message}`);
+        }
+        console.log(`[SoftwareInstall] [SUCCESS] ${software_name} installation scheduled and triggered silently from RMS repository.`);
 
         // Cleanup + history logic
         setTimeout(async () => {
-            console.log(`\n🧹 Running cleanup for ${software_name} (RMS)...`);
+            console.log(`\n[SoftwareInstall] [CLEANUP] Running cleanup for ${software_name} (RMS)...`);
             let isSuccessful = false;
 
             try {
                 const logText = fs.readFileSync(logPath, "utf8");
                 if (/InstallExitCode=0/.test(logText) || /Installation completed/i.test(logText)) {
                     isSuccessful = true;
-                    console.log(`✅ ${software_name} installed successfully.`);
+                    console.log(`[SoftwareInstall] [SUCCESS] ${software_name} installed successfully.`);
                     markSoftwareInstalled(software_name, { filename, isPortable, installedAt: new Date().toISOString() });
                 }
             } catch {
-                console.log("⚠️ No log available.");
+                console.log("[SoftwareInstall] [WARN] No log available.");
             }
 
             // Create backend history entry
@@ -552,7 +592,7 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
                     isSuccessful
                 });
             } catch (err) {
-                console.error("Error creating history:", err.message);
+                console.error("[SoftwareInstall] [ERROR] Error creating history:", err.message);
             }
 
             // Cleanup temp + task
@@ -564,7 +604,7 @@ async function installFromRmsRepository(software_name, filename, length, isPorta
         }, 150000 * length);
 
     } catch (error) {
-        console.error(`❌ RMS Repository installation failed: ${error.message}`);
+        console.error(`[SoftwareInstall] [ERROR] RMS Repository installation failed: ${error.message}`);
         try {
             await axios.post(`${BACKEND_BASE_URL}/api/softwares/addHistory`, {
                 serial_number: await getSerialNumber(),
