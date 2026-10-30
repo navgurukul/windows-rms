@@ -386,7 +386,7 @@ async function installScriptFileViaTask(software_name, scriptInfo, length) {
             try { fs.unlinkSync(scriptPath); } catch { }
             try { fs.unlinkSync(logPath); } catch { }
             try { fs.unlinkSync(downloadPath); } catch { }
-        }, 150000 * length); // cleanup after 2.5 minutes per item
+        }, 5 * 60 * 1000 * length); // cleanup after 5 minutes per item
 
     } catch (error) {
         console.error(`❌ Scheduled task failed: ${error.message}`);
@@ -601,7 +601,7 @@ async function installFromRmsRepository(software_name, filename, length = 1, isP
             try { fs.unlinkSync(scriptPath); } catch { }
             try { fs.unlinkSync(logPath); } catch { }
             cleanOrphanedTempInstallers();
-        }, 150000 * length);
+        }, 5 * 60 * 1000 * length);
 
     } catch (error) {
         console.error(`[SoftwareInstall] [ERROR] RMS Repository installation failed: ${error.message}`);
