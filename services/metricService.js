@@ -60,7 +60,7 @@ async function initializeFiles() {
     await ensureDirectoryExists();
 
     // Set totalActiveTime to 1 (always start fresh)
-    totalActiveTime = 1;
+    totalActiveTime = 0;
 
     // Ensure history.json exists
     try {
@@ -140,7 +140,7 @@ async function checkDateChange() {
               serial_number: dailyData.serial_number,
               username: dailyData.username,
               // Use the actual accumulated time, not just 5
-              total_time: dailyData.active_time,
+              total_time: Math.min(dailyData.active_time || 0, 1440),
               last_updated: dailyData.last_updated || new Date().toISOString(),
               latitude: dailyData.latitude,
               longitude: dailyData.longitude,
@@ -160,7 +160,7 @@ async function checkDateChange() {
           }
 
           // Reset tracking variables for the new day
-          totalActiveTime = 1;
+          totalActiveTime = 0;
           backendTotalTime = 0;
           const newDailyData = await collectCurrentMetrics();
           await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(newDailyData, null, 2));
@@ -187,7 +187,7 @@ async function checkDateChange() {
       console.error('Error checking date change:', error);
 
       // If we can't read the file, create a new one for today
-      totalActiveTime = 1;
+      totalActiveTime = 0;
       backendTotalTime = 0;
       const newDailyData = await collectCurrentMetrics();
       await fs.writeFile(DAILY_JSON_FILE, JSON.stringify(newDailyData, null, 2));
@@ -265,7 +265,7 @@ async function updateMetrics() {
     await checkDateChange();
 
     // Increment active time by 1 minute
-    totalActiveTime += 1;
+    if (totalActiveTime < 1440) totalActiveTime += 1;
 
     // Check if we've reached a 5-minute interval
     if (totalActiveTime >= 5) {
@@ -277,7 +277,7 @@ async function updateMetrics() {
       if (syncSuccess) {
         // Only reset if sync was successful
         console.log('Sync successful, resetting counter to 1');
-        totalActiveTime = 1;
+        totalActiveTime = 0;
         // Increment backend total only on successful sync
         backendTotalTime += 5;
       } else {
@@ -325,7 +325,7 @@ async function syncData() {
     }
 
     // Then try to sync today's data
-    const singleSuccess = await syncSingleData();
+    const singleSuccess = totalActiveTime >= 5 ? await syncSingleData() : false;
     if (singleSuccess) {
       console.log('Single sync successful');
       lastSyncTime = Date.now();
