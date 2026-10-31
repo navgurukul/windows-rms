@@ -4,7 +4,16 @@ const { app, BrowserWindow } = require('electron');
 // -------------------- SINGLE INSTANCE LOCK --------------------
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
+  console.log("[Main] Another instance is already running. Quitting.");
   app.quit();
+} else {
+  app.on("second-instance", () => {
+    console.log("[Main] Second instance attempted to launch.");
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
 }
 
 const path = require('path');
@@ -105,9 +114,9 @@ function registerAsStartup() {
 
 
     execSync(cmd, { stdio: "ignore" });
-    console.log("✅ Scheduled Task created for startup.");
+    console.log("[Main] Scheduled Task created for startup.");
   } catch (err) {
-    console.error("🚩 Failed to register scheduled task:", err);
+    console.error("[Main] Failed to register scheduled task:", err);
   }
 }
 
@@ -252,6 +261,15 @@ app.whenReady().then(async () => {
   ({ ensureCertificateInstalled } = require('./services/certificateService'));
   autoUpdater = require('./services/autoUpdaterService');
 
+  // Connect update pending handler to prepare main process for silent update and restart
+  autoUpdater.setUpdatePendingHandler((info) => {
+    console.log(`[Main] Update v${info.version} downloaded. Stopping background services for immediate restart...`);
+    if (metricsInterval) clearInterval(metricsInterval);
+    if (syncInterval) clearInterval(syncInterval);
+    if (errorUploadInterval) clearInterval(errorUploadInterval);
+    autoUpdater.stopPeriodicUpdateChecks();
+  });
+
   // 3. Consolidate other startup tasks that were originally in the IIFE
   try {
     registerAsStartup();
@@ -285,41 +303,69 @@ app.whenReady().then(async () => {
 async function handleShutdown() {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log('\nInitiating graceful shutdown...');
+  console.log('\n[Main] Initiating graceful shutdown...');
 
   try {
     if (metricsInterval) clearInterval(metricsInterval);
     if (syncInterval) clearInterval(syncInterval);
     if (errorUploadInterval) clearInterval(errorUploadInterval);
 
-    autoUpdater.stopPeriodicUpdateChecks();
+    if (autoUpdater && typeof autoUpdater.stopPeriodicUpdateChecks === "function") {
+      autoUpdater.stopPeriodicUpdateChecks();
+    }
 
-    await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
-      serial_number: await metricService.getSerialNumber(),
-      isActive: false,
-      rms_version: app.getVersion(),
-    });
+    try {
+      await axios.post(`${config.BACKEND_BASE_URL}/api/devices/statusUpdate`, {
+        serial_number: await metricService.getSerialNumber(),
+        isActive: false,
+        rms_version: app.getVersion(),
+      }, { timeout: 4000 });
+    } catch (netErr) {
+      console.warn('[Main] Could not notify server of statusUpdate on shutdown:', netErr.message);
+    }
 
     const forceQuitTimeout = setTimeout(() => {
-      console.log('Forcing app quit due to timeout...');
+      console.log('[Main] Forcing app exit due to shutdown timeout...');
       app.exit(0);
     }, 5000);
 
-    await metricService.sendFinalMetrics();
+    try {
+      await metricService.sendFinalMetrics();
+    } catch (metricErr) {
+      console.warn('[Main] Could not send final metrics on shutdown:', metricErr.message);
+    }
+
     clearTimeout(forceQuitTimeout);
+
+    // Release single-instance lock before exit
+    try {
+      if (typeof app.releaseSingleInstanceLock === "function") {
+        app.releaseSingleInstanceLock();
+      }
+    } catch (_) {}
+
     app.exit(0);
   } catch (err) {
-    console.error('Error during shutdown:', err);
+    console.error('[Main] Error during shutdown:', err);
     app.exit(1);
   }
 }
 
 app.on('window-all-closed', () => handleShutdown());
+
 app.on('before-quit', (event) => {
+  // CRITICAL: If quitting because an auto-update is ready to install, DO NOT call event.preventDefault()!
+  // Allowing the quit to proceed immediately lets elevate.exe and the NSIS installer overwrite files cleanly without file-locking.
+  if (autoUpdater && typeof autoUpdater.isUpdateInProgress === "function" && autoUpdater.isUpdateInProgress()) {
+    console.log('[Main] Application is quitting for auto-update installation. Allowing immediate exit.');
+    return;
+  }
+
   if (!isShuttingDown) {
     event.preventDefault();
     handleShutdown();
   }
 });
+
 process.on('SIGINT', handleShutdown);
 process.on('SIGTERM', handleShutdown);
