@@ -187,7 +187,7 @@ async function isSoftwareInstalled(wingetId, softwareName) {
     }
 }
 
-async function installViaWingetTask(software_name, softwareId, length, source) {
+async function installViaWingetTask(software_name, softwareId, length, source, shouldUpdateSource = false) {
     const tempDir = os.tmpdir();
     const scriptPath = path.join(tempDir, `${softwareId}-winget-install.ps1`);
     const logPath = path.join(tempDir, `${softwareId}-winget-install.log`);
@@ -195,10 +195,20 @@ async function installViaWingetTask(software_name, softwareId, length, source) {
     const startTime = getFutureTime(2);
     const effectiveSource = source ? source : "winget";  // default fallback
 
+    const sourceUpdateBlock = shouldUpdateSource
+        ? `
+            Write-Host "Updating Winget sources before installation..."
+            try {
+                winget source update --disable-interactivity
+            } catch {
+                Write-Host "Winget source update notice: $($_.Exception.Message)"
+            }`
+        : "";
+
     // Create PowerShell script (silent install with logging)
     const psContent = `
         Start-Transcript -Path "${logPath}" -Append
-        try {
+        try {${sourceUpdateBlock}
             winget install --id ${softwareId} --source ${effectiveSource} --silent --accept-source-agreements --accept-package-agreements --force --disable-interactivity --scope machine
         } catch {
             Write-Host "Error installing ${softwareId}: $($_.Exception.Message)"
@@ -438,8 +448,13 @@ schedule.schedule("0 5 * * *", async () => {
     try {
         const resp = await axios.get(`${BACKEND_BASE_URL}/api/softwares/notInstalled?serial_number=${await getSerialNumber()}`);
         const ids = resp.data.softwareName || [];
+        let hasUpdatedSource = false;
         for (const id of ids) {
-            if (typeof id === "string") await installViaWingetTask(id);
+            if (typeof id === "string") {
+                const shouldUpdate = !hasUpdatedSource;
+                if (shouldUpdate) hasUpdatedSource = true;
+                await installViaWingetTask(id, id, ids.length, "winget", shouldUpdate);
+            }
         }
     } catch (err) {
         console.error("Error fetching or installing:", err.message);
@@ -631,6 +646,8 @@ const demoFunction = async () => {
                 return;
             }
 
+            let hasUpdatedWingetSources = false;
+
             for (const software of notInstalled) {
                 const { software_name, winget_id, source, isPortable } = software;
 
@@ -675,7 +692,11 @@ const demoFunction = async () => {
                     cleanOrphanedTempInstallers();
                     await installFromRmsRepository(software_name, winget_id, notInstalled.length, isPortable);
                 } else {
-                    await installViaWingetTask(software_name, winget_id, notInstalled.length, source);
+                    const shouldUpdate = !hasUpdatedWingetSources;
+                    if (shouldUpdate) {
+                        hasUpdatedWingetSources = true;
+                    }
+                    await installViaWingetTask(software_name, winget_id, notInstalled.length, source, shouldUpdate);
                 }
             }
         }, 5000);
